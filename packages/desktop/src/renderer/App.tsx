@@ -1,10 +1,15 @@
-import { useState } from 'react';
 import LeftNav from './layouts/LeftNav';
 import MainArea from './layouts/MainArea';
 import RightPanel from './layouts/RightPanel';
+import { useUiStore } from './stores/uiStore';
+import { useGatewayEventDispatcher } from './hooks/useGatewayDispatcher';
 
 export default function App() {
-  const [rightPanelOpen, setRightPanelOpen] = useState(false);
+  const rightPanelOpen = useUiStore((s) => s.rightPanelOpen);
+  const toggleRightPanel = useUiStore((s) => s.toggleRightPanel);
+  const setRightPanelOpen = useUiStore((s) => s.setRightPanelOpen);
+
+  useGatewayEventDispatcher();
 
   return (
     <div className="flex h-screen overflow-hidden bg-[var(--bg-primary)]">
@@ -21,7 +26,7 @@ export default function App() {
 
       {/* Main Content Area — flexible */}
       <main className="flex-1 min-w-0 flex flex-col">
-        <MainArea onTogglePanel={() => setRightPanelOpen((v) => !v)} />
+        <MainArea onTogglePanel={toggleRightPanel} />
       </main>
 
       {/* Right Context Panel — 320px, collapsible */}
