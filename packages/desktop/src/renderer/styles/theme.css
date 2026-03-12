@@ -41,11 +41,8 @@
    Base Styles
    ============================================================ */
 
-* {
-  margin: 0;
-  padding: 0;
-  box-sizing: border-box;
-}
+/* Tailwind v4 Preflight already sets *, ::before, ::after { margin:0; padding:0; box-sizing:border-box }
+   via @layer base. Do NOT duplicate here — unlayered styles override @layer utilities. */
 
 html, body, #root {
   height: 100%;

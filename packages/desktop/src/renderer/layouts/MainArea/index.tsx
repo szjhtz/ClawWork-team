@@ -49,7 +49,7 @@ export default function MainArea({ onTogglePanel }: MainAreaProps) {
     <div className="flex flex-col h-full">
       {/* Top bar */}
       <header className="titlebar-drag flex items-center justify-between h-12 px-4 border-b border-[var(--border)] flex-shrink-0">
-        <div className="flex items-center gap-2 pl-16">
+        <div className="flex items-center gap-2">
           {activeTask ? (
             <>
               <h2 className="text-sm font-medium text-[var(--text-primary)] truncate">

@@ -45,24 +45,48 @@ Channel Plugin 运行在 OpenClaw 进程里（不是 Electron 里）。它告诉
 │   │   └── src/
 │   │       ├── types.ts      # Task, Message, Artifact, ToolCall, ProgressStep
 │   │       ├── protocol.ts   # WsMessage 联合类型 + type guards
-│   │       └── constants.ts  # 端口号, buildSessionKey(), 心跳参数
+│   │       ├── gateway-protocol.ts  # GatewayFrame 类型, GatewayConnectParams
+│   │       ├── constants.ts  # 端口号, buildSessionKey(), parseTaskIdFromSessionKey()
+│   │       └── index.ts      # barrel export
 │   ├── channel-plugin/       # openclaw-channel-clawwork — OpenClaw 插件
 │   │   ├── openclaw.plugin.json
-│   │   └── src/index.ts      # register() → WS server + outbound adapter
+│   │   └── src/index.ts      # register() → WS server + outbound adapter (骨架)
 │   └── desktop/              # @clawwork/desktop — Electron 应用
 │       ├── electron.vite.config.ts  # React + Tailwind v4 vite plugin
 │       └── src/
-│           ├── main/index.ts        # Electron 主进程, hiddenInset titleBar
-│           ├── preload/index.ts     # contextBridge
+│           ├── main/
+│           │   ├── index.ts         # Electron 主进程, hiddenInset titleBar
+│           │   ├── ws/
+│           │   │   ├── gateway-client.ts  # GatewayClient: challenge-response auth, heartbeat, reconnect
+│           │   │   ├── plugin-client.ts   # PluginClient: Channel Plugin WS 连接
+│           │   │   └── index.ts           # initWebSockets, getters, destroy
+│           │   └── ipc/
+│           │       └── ws-handlers.ts     # IPC handlers: send-message, chat-history, list-sessions, gateway-status
+│           ├── preload/
+│           │   ├── index.ts         # buildApi() factory, contextBridge
+│           │   └── clawwork.d.ts    # ClawWorkAPI interface
 │           └── renderer/
 │               ├── index.html
 │               ├── main.tsx         # React 入口
 │               ├── App.tsx          # 三栏布局 (260px | flex | 320px)
 │               ├── styles/theme.css # dark/light CSS Variables, accent #0FFD0D
+│               ├── stores/
+│               │   ├── taskStore.ts     # Task CRUD, activeTaskId
+│               │   ├── messageStore.ts  # messagesByTask, streamingByTask
+│               │   └── uiStore.ts       # rightPanelOpen, unreadTaskIds
+│               ├── components/
+│               │   ├── ChatMessage.tsx      # Markdown 渲染 + rehype-highlight
+│               │   ├── ChatInput.tsx        # Textarea, Enter/Shift+Enter, auto-resize
+│               │   ├── StreamingMessage.tsx  # 流式响应 + cursor 动画
+│               │   ├── ToolCallCard.tsx     # 可折叠工具调用卡片
+│               │   └── ContextMenu.tsx      # 右键菜单 + useTaskContextMenu hook
+│               ├── hooks/
+│               │   ├── useGatewayDispatcher.ts  # Gateway chat 事件 → stores
+│               │   └── useAgentMessages.ts      # Phase 1 遗留 hook（未使用）
 │               └── layouts/
-│                   ├── LeftNav/     # 新任务、搜索、文件管理、任务列表、设置
-│                   ├── MainArea/    # 顶栏 + 消息区 + 输入框
-│                   └── RightPanel/  # 任务产物 + 版本记录
+│                   ├── LeftNav/     # 动态任务列表 (分组+排序), 新任务按钮, 右键菜单
+│                   ├── MainArea/    # 对话消息流, 欢迎屏, 滚动管理
+│                   └── RightPanel/  # Progress 提取, Artifacts 列表, Git 占位
 ```
 
 ### 包间依赖
@@ -82,7 +106,7 @@ channel-plugin  @clawwork/desktop
 |---|---|
 | 框架 | Electron 34 + electron-vite 3 |
 | 前端 | React 19, TypeScript 5.x, Tailwind CSS v4 |
-| 状态管理 | Zustand 5 (计划) |
+| 状态管理 | Zustand 5 |
 | 数据库 | better-sqlite3 + Drizzle ORM (计划) |
 | Git 操作 | simple-git (计划) |
 | 图标 | lucide-react |
@@ -162,12 +186,12 @@ CSS Variables 驱动，dark 为默认。切换方式：`<html data-theme="dark|l
 
 ## 当前进度
 
-### 已完成 ✅
+### Phase 1 — 已完成 ✅ (commits `375154c`, `c882b4e`)
 
 - **T1-0** Monorepo 骨架 (pnpm workspace, tsconfig, .gitignore, git init)
 - **T1-1** Desktop 包 (Electron main, preload, renderer 入口, theme CSS)
 - **T1-2** Channel Plugin (register(), WS server, sendText/sendMedia outbound adapter)
-- **T1-3** Shared 类型 (types.ts, protocol.ts, constants.ts) — Drizzle ORM schema 待做
+- **T1-3** Shared 类型 (types.ts, protocol.ts, gateway-protocol.ts, constants.ts) — Drizzle ORM schema 待做
 - **T1-4** 三栏布局 (App.tsx: 260px LeftNav | flex MainArea | 320px RightPanel, 右侧可折叠)
 - **T1-5** LeftNav 静态结构 (新任务按钮, 搜索框, 文件管理入口, 示例任务列表, 设置)
 - **T1-7** Electron 主进程 WS 客户端：Gateway challenge-response 认证、心跳、指数退避重连
@@ -176,13 +200,29 @@ CSS Variables 驱动，dark 为默认。切换方式：`<html data-theme="dark|l
 
 **Phase 1 验收标准已达成：在 Electron DevTools 中通过 `window.clawwork.sendMessage()` 与 Agent 完成一轮对话，事件正确回传。**
 
+### Phase 2 — 已完成 ✅ (commit `bc220ad`)
+
+- **T2-0** 安装 zustand, react-markdown, rehype-highlight
+- **T2-1** New Task 流程：taskStore.createTask()，创建任务并自动设为 active
+- **T2-2** 任务列表渲染：动态读取 taskStore，按状态分组 (Active → Completed → Archived)，按创建时间倒序
+- **T2-3** 右键菜单：ContextMenu 组件 + useTaskContextMenu hook，状态流转 active→completed→archived
+- **T2-4** ChatMessage 组件：Markdown 渲染 (react-markdown + rehype-highlight)，用户/助手/系统角色区分
+- **T2-5** ChatInput 组件：Shift+Enter 换行，Enter 发送，textarea 自动伸缩高度
+- **T2-6** StreamingMessage 组件：流式响应 delta 累加 + 光标闪烁动画
+- **T2-7** ToolCallCard 组件：可折叠工具调用卡片，显示 arguments/result
+- **T2-8** Progress 面板：从 AI 消息中提取 `- [x]`/`- [ ]` 模式，显示进度步骤
+- **T2-9** Artifacts 面板：从消息的 artifacts 字段列出文件产物
+- **Bug fix** Zustand selector 无限循环：移除 store 中的 getter 方法，改为直接 state 访问 + EMPTY_MESSAGES 哨兵值
+- **Bug fix** Gateway chat 事件解析：content 位于 `payload.message.content[]`，不是 `payload.content[]`
+- **Preload 重构** buildApi() 工厂函数，修复类型错误
+
 ### 延后
 
-- **T1-6** Channel Plugin 完善：Gateway 单通道已能完成完整对话，Plugin WS 通道延后到 Phase 2
+- **T1-6** Channel Plugin 完善：Gateway 单通道已能完成完整对话，Plugin WS 通道延后
+- **T2-10** 多任务并行验证：功能已就绪，但未做系统性测试
 
 ### 后续 Phase 概览
 
-- **Phase 2** — 核心 UI 交互 (T2-1 ~ T2-10): Task CRUD、对话流组件、流式响应、工具调用折叠块、Progress/Artifacts 面板、多任务并行验证
 - **Phase 3** — 产物管理 (T3-1 ~ T3-7): sendMedia 文件落盘、Git auto-commit、文件浏览器 (搜索+筛选+宫格列表+跳转回 Task)
 - **Phase 4** — 打磨+打包 (T4-1 ~ T4-7): 主题切换、全局搜索 (FTS5)、Settings、错误处理、electron-builder dmg
 
@@ -211,6 +251,43 @@ Phase 4:
   [T4-1, T4-2, T4-3, T4-4]   全部可并行
   T4-5 → T4-6 → T4-7   打包链路（串行）
 ```
+
+## 技术发现（踩坑记录）
+
+### Gateway 协议关键细节
+
+1. **Challenge-response 认证**：服务端先发 `connect.challenge`（含 nonce），客户端必须回复 `connect` 请求（protocol=3, client.id=`gateway-client`, mode=`backend`）
+2. **`chat.send` 参数**：`sessionKey` + `message`（不是 `text`）+ `idempotencyKey`（UUID）。返回 `{runId, status: "started"}`，非阻塞
+3. **Chat event payload 结构（关键坑）**：内容在 `payload.message.content[]`，不是 `payload.content[]`。这是 Phase 2 消息不显示的根因
+4. **Preload 路径**：electron-vite 输出 preload 为 `.mjs`（不是 `.js`），主进程加载路径需对应
+5. **`@clawwork/shared` 不能 externalize**：在 electron-vite 配置中必须 bundle 进去
+
+### Zustand 陷阱
+
+**禁止在 selector 中调用 `get()`**。`useStore((s) => s.someMethod())` 其中 `someMethod` 内部调用 `get()` 会导致无限重渲染（每次返回新对象引用）。解法：直接访问 state 字段 + 模块级 `const EMPTY_ARRAY: T[] = []` 哨兵值避免空数组引用变化。
+
+### Gateway 完整协议参考
+
+详细协议文档已存储在 `~/.agents/memories/-Users-x-git-samzong-clawwork/gateway-ws-protocol.md`，包含：帧格式、连接握手、有效 client ID/mode 枚举、RPC 方法列表、事件类型、chat 消息结构、可用 Agent 列表。
+
+### Tailwind v4 `@layer` 优先级陷阱
+
+Tailwind v4 将所有 utility classes 输出到 `@layer utilities` 中。根据 CSS 规范，**unlayered 样式的优先级永远高于任何 `@layer` 内的样式**——无论选择器特异性如何。
+
+因此，如果在 `theme.css`（`@import "tailwindcss"` 所在文件）中写了 unlayered 的全局 reset：
+
+```css
+/* 错误：这会覆盖所有 Tailwind padding/margin utilities */
+* { margin: 0; padding: 0; box-sizing: border-box; }
+```
+
+则 `pt-14`、`px-4`、`pb-3` 等 **所有** padding/margin utility 都会被覆盖为 0px，完全无效。
+
+**解法：** 删掉这段 reset。Tailwind v4 Preflight（`@layer base`）已经包含了 `* { margin: 0; padding: 0; box-sizing: border-box }`，不需要重复。如果必须写自定义 base 样式，用 `@layer base { ... }` 包裹。
+
+### Electron 自动截图排障方法
+
+开发模式下 `main/index.ts` 自动在 `did-finish-load` 后截图到 `/tmp/clawwork-screenshot.png`，也支持 `Cmd+Shift+S` 手动触发。当截图看起来没变化时，不要反复重启——用 `executeJavaScript` 注入诊断脚本 dump `getComputedStyle()` 到 `/tmp/clawwork-debug.json`，直接确认 CSS 是否生效。
 
 ## 已知问题与风险
 

@@ -423,16 +423,23 @@ S3-compatible（AWS S3 / MinIO / Cloudflare R2）
 
 > **注意**：OpenClaw 近期（v2026.3.2）加强了 `mediaLocalRoots` 安全校验，channel plugin 必须正确传播 `mediaLocalRoots` 参数，否则文件发送会报 `LocalMediaAccessError("path-not-allowed")`。参见 issue [#20258] 和 [#36477]。
 
-### 3.5 待确认技术问题
+### 3.5 已确认技术细节 + 待确认问题
 
-> **TODO**: 以下问题需要在开发前通过阅读 OpenClaw 源码或社区咨询确认：
+**已确认（通过逆向工程验证）：**
 
-1. **Gateway 协议细节**：`{type:"req", id, method, params}` 这套 JSON-over-WebSocket 协议的完整 method 列表，特别是 session 创建和消息发送的 method
-2. **Session 自动重置禁用**：如何在 channel plugin 级别禁用 4:00 AM 自动重置，避免打断长期 Task 的对话上下文
-3. **WebSocket 重连后的 session 恢复**：客户端断线重连后，如何从 Gateway 拉取中断期间的未接收消息？是否需要通过 `sessions_history` 工具补齐？
-4. **`mediaLocalRoots` 配置**：ClawWork场景下如何正确配置允许的文件访问目录？
-5. **Channel Plugin 验证问题**：已知 issue [#12484] — 自定义 channel ID 在启动时校验会失败，需要确认最新版本是否已修复
-6. **广播过滤**：Gateway 已知不做 session 级事件过滤（issue [#32579]），确认是否有计划修复，或者客户端侧过滤是否是官方推荐方案
+1. **Gateway 协议**：JSON-RPC 风格帧格式（`req`/`res`/`event`），protocol version 3，challenge-response 认证。完整协议参考存储在项目 memory 中
+2. **Chat 事件 payload 结构**：`payload.message.content[]`（不是 `payload.content[]`）。content 是数组，支持 `text`、`thinking`、`toolCall` 三种 block 类型
+3. **有效 Client ID/Mode**：Electron 使用 `client.id="gateway-client"` + `mode="backend"`。避免 `openclaw-control-ui`（会触发浏览器 origin 检查）
+4. **广播过滤**：客户端侧按 sessionKey 过滤是当前可行方案（Gateway 暂无 session 级过滤计划）
+
+**待确认：**
+
+1. ~~Gateway 协议细节~~ → 已逆向完整协议
+2. **Session 自动重置禁用**：如何在 channel plugin 级别禁用 4:00 AM 自动重置
+3. **WebSocket 重连后的 session 恢复**：断线重连后通过 `chat.history` RPC 可补齐历史消息
+4. **`mediaLocalRoots` 配置**：ClawWork 场景下如何正确配置
+5. ~~Channel Plugin 验证问题~~ → T1-6 延后，当前通过 Gateway 直连绕过
+6. ~~广播过滤~~ → 客户端侧过滤已实现
 
 ---
 
@@ -593,31 +600,31 @@ S3-compatible（AWS S3 / MinIO / Cloudflare R2）
 
 #### 1.1 项目初始化（可并行）
 
-- [ ] **T1-0** 初始化 monorepo 骨架：pnpm workspace + `packages/shared` + `packages/channel-plugin` + `packages/desktop` 三个包 + tsconfig.base.json
+- [x] **T1-0** 初始化 monorepo 骨架：pnpm workspace + `packages/shared` + `packages/channel-plugin` + `packages/desktop` 三个包 + tsconfig.base.json
   - ✅ Check：`pnpm install` 成功，三个包互相引用类型不报错
-- [ ] **T1-1** `packages/desktop`：用 electron-vite 初始化 Electron 应用（React 19 + TS + Tailwind v4）
+- [x] **T1-1** `packages/desktop`：用 electron-vite 初始化 Electron 应用（React 19 + TS + Tailwind v4）
   - ✅ Check：`pnpm --filter @clawwork/desktop dev` 能启动空白 Electron 窗口
-- [ ] **T1-2** `packages/channel-plugin`：初始化 Channel Plugin，含 `openclaw.plugin.json` + `register()` 入口
+- [x] **T1-2** `packages/channel-plugin`：初始化 Channel Plugin，含 `openclaw.plugin.json` + `register()` 入口
   - ✅ Check：`openclaw plugins install -l ./packages/channel-plugin` 成功，能被 OpenClaw 加载（即使报校验警告）
-- [ ] **T1-3** `packages/shared`：定义 WsMessage 协议类型 + Task/Message/Artifact 类型；`packages/desktop` 中配置 Drizzle ORM + better-sqlite3
-  - ✅ Check：两个包都能 import `@clawwork/shared` 的类型，SQLite CRUD 通过单元测试
+- [x] **T1-3** `packages/shared`：定义 WsMessage 协议类型 + Task/Message/Artifact 类型（Drizzle ORM + SQLite 延后到 Phase 3）
+  - ✅ Check：两个包都能 import `@clawwork/shared` 的类型
 
 #### 1.2 三栏布局骨架
 
-- [ ] **T1-4** 实现三栏布局组件（Left Nav 240px + Main Area flex + Right Panel 320px），可折叠右侧面板
+- [x] **T1-4** 实现三栏布局组件（Left Nav 260px + Main Area flex + Right Panel 320px），可折叠右侧面板
   - ✅ Check：三栏响应式渲染，右侧面板可收起/展开
-- [ ] **T1-5** Left Nav：静态结构（New Task 按钮 + Search 入口 + Files 入口 + 空 Task 列表 + Settings 入口）
+- [x] **T1-5** Left Nav：静态结构（New Task 按钮 + Search 入口 + Files 入口 + 空 Task 列表 + Settings 入口）
   - ✅ Check：所有按钮可点击，console.log 确认事件绑定
 
 #### 1.3 OpenClaw 通信链路（T1-1 和 T1-2 完成后）
 
-- [ ] **T1-6** Channel Plugin：实现 `ClawWorkOutboundAdapter.sendText()`，通过 WebSocket 将消息推送到 Electron 客户端
+- [ ] **T1-6** Channel Plugin：实现 `ClawWorkOutboundAdapter.sendText()`（延后 — Gateway 直连已足够完成对话闭环）
   - ✅ Check：OpenClaw Agent 的文本回复能到达 Electron 主进程
-- [ ] **T1-7** Electron 主进程：WebSocket 客户端连接 OpenClaw Gateway（ws://127.0.0.1:18789）
+- [x] **T1-7** Electron 主进程：WebSocket 客户端连接 OpenClaw Gateway（ws://127.0.0.1:18789），含 challenge-response 认证
   - ✅ Check：连接建立，心跳正常，断线自动重连
-- [ ] **T1-8** 实现消息发送：Electron → Gateway，携带 sessionKey
+- [x] **T1-8** 实现消息发送：Electron → Gateway（chat.send），携带 sessionKey + idempotencyKey
   - ✅ Check：从 Electron DevTools console 手动发一条消息，OpenClaw Agent 能收到并回复
-- [ ] **T1-9** 实现消息接收 + sessionKey 路由：Gateway 事件按 sessionKey 分发到对应 Task store
+- [x] **T1-9** 实现消息接收 + sessionKey 路由：Gateway chat 事件通过 IPC 转发到 renderer，按 sessionKey 分发到对应 Task
   - ✅ Check：多个 sessionKey 的消息不会串台
 
 **Phase 1 验收：能在 Electron 空白页面中通过代码与 OpenClaw Agent 完成一轮对话**
@@ -630,29 +637,29 @@ S3-compatible（AWS S3 / MinIO / Cloudflare R2）
 
 #### 2.1 Task 管理
 
-- [ ] **T2-1** New Task 流程：点击按钮 → 创建本地 Task 记录 → 在 OpenClaw 创建新 session → 跳转到对话视图
+- [x] **T2-1** New Task 流程：点击按钮 → 创建本地 Task 记录 → 自动设为 active → 跳转到对话视图
   - ✅ Check：新建 Task 后左侧列表出现新条目，Main Area 切换到空对话页
-- [ ] **T2-2** Task 列表渲染：按时间倒序，显示标题 + 状态标签 + 最后更新时间，当前选中高亮
+- [x] **T2-2** Task 列表渲染：按状态分组（Active → Completed → Archived），组内按创建时间倒序，当前选中高亮
   - ✅ Check：点击不同 Task 可切换 Main Area 显示的对话内容
-- [ ] **T2-3** Task 状态流转：active → completed → archived，Task 列表项支持右键菜单操作
+- [x] **T2-3** Task 状态流转：active → completed → archived，右键菜单 ContextMenu 组件 + useTaskContextMenu hook
   - ✅ Check：状态变更后 UI 即时更新
 
 #### 2.2 对话流组件
 
-- [ ] **T2-4** 消息渲染组件：支持 user / assistant 角色区分，Markdown 渲染（react-markdown + rehype-highlight）
+- [x] **T2-4** 消息渲染组件：支持 user / assistant / system 角色区分，Markdown 渲染（react-markdown + rehype-highlight）
   - ✅ Check：代码块有语法高亮，链接可点击
-- [ ] **T2-5** 输入框组件：支持 Shift+Enter 换行，Enter 发送，发送后清空
+- [x] **T2-5** 输入框组件：支持 Shift+Enter 换行，Enter 发送，发送后清空，textarea 自动伸缩高度
   - ✅ Check：发送消息后 → Agent 回复 → 消息流自动滚动到底部
-- [ ] **T2-6** 流式响应渲染：Agent 回复逐字出现（streaming），打字机效果
+- [x] **T2-6** 流式响应渲染：Gateway chat 事件 delta 累加 + 光标闪烁动画
   - ✅ Check：长回复不是整块出现而是逐步渲染
-- [ ] **T2-7** 工具调用折叠块：AI 的 tool_use 渲染为可展开/折叠的卡片（工具名 + 状态 + 耗时）
+- [x] **T2-7** 工具调用折叠块：AI 的 tool_use 渲染为可展开/折叠的卡片（工具名 + arguments + result）
   - ✅ Check：工具调用默认折叠，点击可展开看详情
 
 #### 2.3 右侧面板
 
-- [ ] **T2-8** Progress 区块：解析 AI 响应中的步骤列表 / todo，渲染为 checklist
+- [x] **T2-8** Progress 区块：解析 AI 响应中的 `- [x]`/`- [ ]` 模式，渲染为 checklist
   - ✅ Check：AI 输出 todo 列表时右侧自动出现进度条，无 todo 时区块隐藏
-- [ ] **T2-9** Artifacts 区块：当前 Task 的产物文件列表，点击可用系统默认应用打开
+- [x] **T2-9** Artifacts 区块：当前 Task 的产物文件列表（从消息 artifacts 字段提取）
   - ✅ Check：Agent 生成文件后 Artifacts 列表自动更新
 
 #### 2.4 多任务并行验证
@@ -879,20 +886,18 @@ clawwork (pnpm monorepo)
 ├── @clawwork/desktop            # Electron 桌面应用
 │   ├── 渲染进程
 │   │   ├── React 19 + TypeScript 5.x
-│   │   ├── Zustand 5（本地 UI 状态）
-│   │   ├── TanStack Query（与 OpenClaw 的数据同步）
+│   │   ├── Zustand 5（状态管理：taskStore, messageStore, uiStore）
 │   │   ├── Tailwind CSS v4 + CSS Variables（主题）
-│   │   └── TanStack Router（类型安全路由）
+│   │   └── react-markdown + rehype-highlight（Markdown 渲染）
 │   ├── 主进程
-│   │   ├── better-sqlite3 + Drizzle ORM（本地数据库）
-│   │   ├── simple-git（git 操作）
-│   │   └── ws（WebSocket 客户端）
-│   ├── 构建：Vite 6 + electron-vite
+│   │   ├── ws（WebSocket 客户端 → Gateway）
+│   │   ├── better-sqlite3 + Drizzle ORM（计划 Phase 3）
+│   │   └── simple-git（计划 Phase 3）
+│   ├── 构建：Vite 6 + electron-vite 3
 │   └── 打包：electron-builder（macOS Universal Binary）
 └── 工具链
-    ├── pnpm workspace（monorepo 管理）
-    ├── Turborepo（可选，任务编排和缓存）
-    └── Vitest（单元测试）
+    ├── pnpm 10 workspace（monorepo 管理）
+    └── lucide-react（图标）
 ```
 
 ### 6.3 UI 组件选型

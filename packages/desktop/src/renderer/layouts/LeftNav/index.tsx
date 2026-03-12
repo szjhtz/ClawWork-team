@@ -80,9 +80,9 @@ export default function LeftNav() {
   const completedTasks = visibleTasks.filter((t) => t.status === 'completed');
 
   return (
-    <div className="flex flex-col h-full pt-10">
+    <div className="flex flex-col h-full pt-14">
       {/* New Task + Search */}
-      <div className="px-3 pb-3 space-y-2 flex-shrink-0">
+      <div className="px-4 pb-3 space-y-2 flex-shrink-0">
         <button
           onClick={createTask}
           className="titlebar-no-drag w-full flex items-center justify-center gap-2 h-9 rounded-lg bg-[var(--accent)] text-black font-medium text-sm hover:opacity-90 transition-opacity"
@@ -100,14 +100,14 @@ export default function LeftNav() {
       </div>
 
       {/* Files shortcut */}
-      <div className="px-3 pb-2 flex-shrink-0">
+      <div className="px-4 pb-2 flex-shrink-0">
         <button className="titlebar-no-drag w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] transition-colors">
           <FolderOpen size={16} className="opacity-60" /> 文件管理
         </button>
       </div>
 
       {/* Task List */}
-      <div className="flex-1 overflow-y-auto px-3 space-y-0.5">
+      <div className="flex-1 overflow-y-auto px-4 space-y-0.5">
         {visibleTasks.length === 0 && (
           <p className="text-xs text-[var(--text-muted)] text-center py-8">
             点击「新任务」开始
@@ -146,7 +146,7 @@ export default function LeftNav() {
       </div>
 
       {/* Settings */}
-      <div className="flex-shrink-0 px-3 py-3 border-t border-[var(--border)]">
+      <div className="flex-shrink-0 px-4 py-3 border-t border-[var(--border)]">
         <button className="titlebar-no-drag w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] transition-colors">
           <Settings size={16} className="opacity-60" /> 设置
         </button>

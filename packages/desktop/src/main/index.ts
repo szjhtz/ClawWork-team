@@ -1,8 +1,35 @@
-import { app, shell, BrowserWindow } from 'electron';
+import { app, shell, BrowserWindow, ipcMain, globalShortcut } from 'electron';
 import { join } from 'path';
+import { writeFileSync } from 'fs';
 import { electronApp, optimizer, is } from '@electron-toolkit/utils';
 import { initWebSockets, destroyWebSockets } from './ws/index.js';
 import { registerWsHandlers } from './ipc/ws-handlers.js';
+
+const SCREENSHOT_PATH = '/tmp/clawwork-screenshot.png';
+
+async function captureScreenshot(win: BrowserWindow): Promise<string> {
+  const image = await win.webContents.capturePage();
+  writeFileSync(SCREENSHOT_PATH, image.toPNG());
+  console.log(`[screenshot] saved to ${SCREENSHOT_PATH}`);
+  return SCREENSHOT_PATH;
+}
+
+function setupDevScreenshot(win: BrowserWindow): void {
+  if (!is.dev) return;
+
+  // Capture initial screenshot after page loads
+  win.webContents.on('did-finish-load', () => {
+    setTimeout(() => captureScreenshot(win), 1500);
+  });
+
+  // Global shortcut: Cmd+Shift+S to capture
+  globalShortcut.register('CommandOrControl+Shift+S', () => {
+    captureScreenshot(win);
+  });
+
+  // IPC handler so renderer or scripts can trigger it
+  ipcMain.handle('dev:screenshot', () => captureScreenshot(win));
+}
 
 function createWindow(): BrowserWindow {
   const mainWindow = new BrowserWindow({
@@ -48,6 +75,7 @@ app.whenReady().then(() => {
   registerWsHandlers();
   const mainWindow = createWindow();
   initWebSockets(mainWindow);
+  setupDevScreenshot(mainWindow);
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {
@@ -64,5 +92,6 @@ app.on('window-all-closed', () => {
 });
 
 app.on('before-quit', () => {
+  globalShortcut.unregisterAll();
   destroyWebSockets();
 });
