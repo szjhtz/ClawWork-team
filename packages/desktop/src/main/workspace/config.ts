@@ -8,6 +8,9 @@ export interface AppConfig {
   workspacePath: string;
   theme?: 'dark' | 'light';
   gatewayUrl?: string;
+  bootstrapToken?: string;
+  password?: string;
+  tlsFingerprint?: string;
 }
 
 function configFilePath(): string {

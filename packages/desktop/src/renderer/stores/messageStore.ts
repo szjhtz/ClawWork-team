@@ -15,6 +15,8 @@ interface MessageState {
   highlightedMessageId: string | null;
 
   addMessage: (taskId: string, role: MessageRole, content: string) => Message;
+  /** Bulk-load messages into store without persisting to DB */
+  bulkLoad: (taskId: string, msgs: Message[]) => void;
   appendStreamDelta: (taskId: string, delta: string) => void;
   finalizeStream: (taskId: string) => void;
   clearMessages: (taskId: string) => void;
@@ -59,6 +61,14 @@ export const useMessageStore = create<MessageState>((set, get) => ({
     }).catch(() => {});
     return msg;
   },
+
+  bulkLoad: (taskId, msgs) =>
+    set((s) => ({
+      messagesByTask: {
+        ...s.messagesByTask,
+        [taskId]: msgs,
+      },
+    })),
 
   appendStreamDelta: (taskId, delta) =>
     set((s) => ({

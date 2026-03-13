@@ -1,5 +1,3 @@
-import type { WsMessage } from '@clawwork/shared';
-
 interface IpcResult {
   ok: boolean;
   result?: Record<string, unknown>;
@@ -21,6 +19,9 @@ interface AppSettings {
   workspacePath: string;
   theme?: 'dark' | 'light';
   gatewayUrl?: string;
+  bootstrapToken?: string;
+  password?: string;
+  tlsFingerprint?: string;
 }
 
 interface SearchResult {
@@ -37,17 +38,59 @@ interface SearchResponse {
   error?: string;
 }
 
+interface PersistedTask {
+  id: string;
+  sessionKey: string;
+  sessionId: string;
+  title: string;
+  status: string;
+  createdAt: string;
+  updatedAt: string;
+  tags: string[];
+  artifactDir: string;
+}
+
+interface PersistedMessage {
+  id: string;
+  taskId: string;
+  role: string;
+  content: string;
+  timestamp: string;
+}
+
+interface DiscoveredSession {
+  taskId: string;
+  sessionKey: string;
+  title: string;
+  updatedAt: string;
+  messages: { role: string; content: string; timestamp: string }[];
+}
+
+interface SyncResult {
+  ok: boolean;
+  discovered?: DiscoveredSession[];
+  error?: string;
+}
+
+interface ListResult<T> {
+  ok: boolean;
+  rows?: T[];
+  error?: string;
+}
+
 export interface ClawWorkAPI {
   sendMessage: (sessionKey: string, content: string) => Promise<IpcResult>;
   chatHistory: (sessionKey: string, limit?: number) => Promise<IpcResult>;
   listSessions: () => Promise<IpcResult>;
   gatewayStatus: () => Promise<ConnectionStatus>;
+  syncSessions: () => Promise<SyncResult>;
 
-  onAgentMessage: (callback: (msg: WsMessage) => void) => void;
   onGatewayEvent: (callback: (data: GatewayEvent) => void) => void;
   onGatewayStatus: (callback: (status: ConnectionStatus) => void) => void;
-  onPluginStatus: (callback: (status: ConnectionStatus) => void) => void;
   removeAllListeners: (channel: string) => void;
+
+  loadTasks: () => Promise<ListResult<PersistedTask>>;
+  loadMessages: (taskId: string) => Promise<ListResult<PersistedMessage>>;
 
   saveArtifact: (params: {
     taskId: string;

@@ -3,7 +3,7 @@ import { cn } from '@/lib/utils'
 
 type Status = 'connected' | 'connecting' | 'disconnected'
 
-interface MergedConfig {
+interface StatusConfig {
   color: string
   label: string
   hint?: string
@@ -12,31 +12,27 @@ interface MergedConfig {
 
 interface ConnectionStatusProps {
   gatewayStatus: Status
-  pluginStatus: Status
   className?: string
 }
 
-function computeMerged(plugin: Status, gateway: Status): MergedConfig {
-  if (plugin === 'disconnected') {
-    return { color: 'bg-[var(--danger)]', label: '不可用', hint: 'Plugin 断开' }
+function computeConfig(status: Status): StatusConfig {
+  switch (status) {
+    case 'connected':
+      return { color: 'bg-[var(--accent)]', label: '已连接' }
+    case 'connecting':
+      return { color: 'bg-[var(--warning)]', label: '连接中…', pulse: true }
+    case 'disconnected':
+      return { color: 'bg-[var(--danger)]', label: '未连接', hint: 'Gateway 断开' }
   }
-  if (plugin === 'connecting') {
-    return { color: 'bg-[var(--warning)]', label: '连接中…', hint: 'Plugin 连接中', pulse: true }
-  }
-  if (gateway === 'connected') {
-    return { color: 'bg-[var(--accent)]', label: '已连接' }
-  }
-  return { color: 'bg-[var(--warning)]', label: '部分连接', hint: 'Gateway 断开' }
 }
 
-export default function ConnectionStatus({ gatewayStatus, pluginStatus, className }: ConnectionStatusProps) {
-  const cfg = computeMerged(pluginStatus, gatewayStatus)
-  const key = `${pluginStatus}-${gatewayStatus}`
+export default function ConnectionStatus({ gatewayStatus, className }: ConnectionStatusProps) {
+  const cfg = computeConfig(gatewayStatus)
 
   return (
     <AnimatePresence mode="wait">
       <motion.div
-        key={key}
+        key={gatewayStatus}
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
         exit={{ opacity: 0 }}

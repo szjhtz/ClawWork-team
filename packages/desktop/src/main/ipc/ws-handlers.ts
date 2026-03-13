@@ -1,17 +1,47 @@
 import { ipcMain } from 'electron';
-import { getGatewayClient, getPluginClient } from '../ws/index.js';
+import { getGatewayClient } from '../ws/index.js';
+import { isClawWorkSession, parseTaskIdFromSessionKey } from '@clawwork/shared';
+
+interface GatewaySessionRow {
+  key: string;
+  sessionId?: string;
+  updatedAt: number | null;
+  derivedTitle?: string;
+  label?: string;
+  displayName?: string;
+}
+
+interface SessionsListPayload {
+  sessions?: GatewaySessionRow[];
+}
+
+interface ChatHistoryMessage {
+  role: string;
+  content: { type: string; text?: string; thinking?: string }[];
+  timestamp?: number;
+}
+
+interface ChatHistoryPayload {
+  messages?: ChatHistoryMessage[];
+  sessionId?: string;
+}
 
 export function registerWsHandlers(): void {
   ipcMain.handle('ws:send-message', async (_event, payload: {
     sessionKey: string;
     content: string;
   }) => {
-    const plugin = getPluginClient();
-    if (!plugin?.isConnected) {
-      return { ok: false, error: 'plugin not connected' };
+    const gw = getGatewayClient();
+    if (!gw?.isConnected) {
+      return { ok: false, error: 'gateway not connected' };
     }
-    const sent = plugin.sendUserMessage(payload.sessionKey, payload.content);
-    return sent ? { ok: true } : { ok: false, error: 'send failed' };
+    try {
+      await gw.sendChatMessage(payload.sessionKey, payload.content);
+      return { ok: true };
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'unknown error';
+      return { ok: false, error: msg };
+    }
   });
 
   ipcMain.handle('ws:chat-history', async (_event, payload: {
@@ -47,10 +77,59 @@ export function registerWsHandlers(): void {
 
   ipcMain.handle('ws:gateway-status', () => {
     const gw = getGatewayClient();
-    const plugin = getPluginClient();
-    return {
-      connected: gw?.isConnected ?? false,
-      pluginConnected: plugin?.isConnected ?? false,
-    };
+    return { connected: gw?.isConnected ?? false };
+  });
+
+  ipcMain.handle('ws:sync-sessions', async () => {
+    const gw = getGatewayClient();
+    if (!gw?.isConnected) {
+      return { ok: false, error: 'gateway not connected' };
+    }
+    try {
+      const raw = await gw.listSessions() as unknown as SessionsListPayload;
+      const allSessions = raw.sessions ?? [];
+      const ours = allSessions.filter((s) => isClawWorkSession(s.key));
+
+      const discovered: {
+        taskId: string;
+        sessionKey: string;
+        title: string;
+        updatedAt: string;
+        messages: { role: string; content: string; timestamp: string }[];
+      }[] = [];
+
+      for (const s of ours) {
+        const taskId = parseTaskIdFromSessionKey(s.key);
+        if (!taskId) continue;
+
+        const historyRaw = await gw.getChatHistory(s.key, 200) as unknown as ChatHistoryPayload;
+        const msgs = (historyRaw.messages ?? []).map((m) => ({
+          role: m.role,
+          content: (m.content ?? [])
+            .filter((b) => b.type === 'text' && b.text)
+            .map((b) => b.text!)
+            .join(''),
+          timestamp: m.timestamp
+            ? new Date(m.timestamp).toISOString()
+            : new Date().toISOString(),
+        })).filter((m) => m.content);
+
+        discovered.push({
+          taskId,
+          sessionKey: s.key,
+          title: s.derivedTitle ?? s.label ?? s.displayName ?? '',
+          updatedAt: s.updatedAt
+            ? new Date(s.updatedAt).toISOString()
+            : new Date().toISOString(),
+          messages: msgs,
+        });
+      }
+
+      return { ok: true, discovered };
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'unknown error';
+      console.error('[ws] sync-sessions failed:', msg);
+      return { ok: false, error: msg };
+    }
   });
 }

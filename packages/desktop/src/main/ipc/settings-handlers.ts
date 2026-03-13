@@ -16,14 +16,7 @@ export function registerSettingsHandlers(): void {
       if (partial.gatewayUrl) {
         const gateway = getGatewayClient();
         if (gateway) {
-          try {
-            const url = new URL(partial.gatewayUrl);
-            const host = url.hostname;
-            const port = parseInt(url.port, 10) || 18789;
-            gateway.updateUrl(host, port);
-          } catch {
-            console.error('[settings] invalid gatewayUrl:', partial.gatewayUrl);
-          }
+          gateway.updateUrl(partial.gatewayUrl);
         }
       }
 

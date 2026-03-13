@@ -23,9 +23,6 @@ interface UiState {
   gatewayStatus: GatewayConnectionStatus;
   setGatewayStatus: (status: GatewayConnectionStatus) => void;
 
-  pluginStatus: GatewayConnectionStatus;
-  setPluginStatus: (status: GatewayConnectionStatus) => void;
-
   /** taskIds with unread messages (background tasks that received new content) */
   unreadTaskIds: Set<string>;
   markUnread: (taskId: string) => void;
@@ -48,9 +45,6 @@ export const useUiStore = create<UiState>((set) => ({
 
   gatewayStatus: 'connecting',
   setGatewayStatus: (status) => set({ gatewayStatus: status }),
-
-  pluginStatus: 'connecting',
-  setPluginStatus: (status) => set({ pluginStatus: status }),
 
   unreadTaskIds: new Set(),
   markUnread: (taskId) =>

@@ -15,6 +15,7 @@ export default function Settings({ onClose }: SettingsProps) {
   const theme = useUiStore((s) => s.theme)
   const setTheme = useUiStore((s) => s.setTheme)
   const [gatewayUrl, setGatewayUrl] = useState('ws://127.0.0.1:18789')
+  const [bootstrapToken, setBootstrapToken] = useState('')
   const [workspacePath, setWorkspacePath] = useState('')
 
   useEffect(() => {
@@ -22,6 +23,7 @@ export default function Settings({ onClose }: SettingsProps) {
       if (!settings) return
       setWorkspacePath(settings.workspacePath || '未配置')
       if (settings.gatewayUrl) setGatewayUrl(settings.gatewayUrl)
+      if (settings.bootstrapToken) setBootstrapToken(settings.bootstrapToken)
     })
   }, [])
 
@@ -30,17 +32,21 @@ export default function Settings({ onClose }: SettingsProps) {
     toast.success('Theme updated')
   }, [setTheme])
 
-  const handleSaveGateway = useCallback(() => {
+  const handleSaveConnection = useCallback(() => {
     try {
       new URL(gatewayUrl)
     } catch {
       toast.error('Invalid URL format')
       return
     }
-    window.clawwork.updateSettings({ gatewayUrl }).then(() => {
+    const updates: Record<string, string> = { gatewayUrl }
+    if (bootstrapToken.trim()) {
+      updates.bootstrapToken = bootstrapToken.trim()
+    }
+    window.clawwork.updateSettings(updates).then(() => {
       toast.success('Reconnecting...')
     })
-  }, [gatewayUrl])
+  }, [gatewayUrl, bootstrapToken])
 
   const sectionLabel = 'text-xs text-[var(--text-tertiary,var(--text-muted))] uppercase tracking-wider mb-3'
   const cardClass = cn(
@@ -92,20 +98,33 @@ export default function Settings({ onClose }: SettingsProps) {
           </div>
         </section>
 
-        {/* Gateway URL */}
+        {/* Connection */}
         <section>
           <p className={sectionLabel}>连接</p>
-          <div className={cardClass}>
-            <label className="text-sm text-[var(--text-secondary)] mb-2 block">Gateway 地址</label>
-            <div className="flex gap-2">
+          <div className={cn(cardClass, 'space-y-4')}>
+            <div>
+              <label className="text-sm text-[var(--text-secondary)] mb-2 block">Gateway 地址</label>
               <input
                 type="text"
                 value={gatewayUrl}
                 onChange={(e) => setGatewayUrl(e.target.value)}
-                className={inputClass}
+                placeholder="ws://127.0.0.1:18789"
+                className={cn(inputClass, 'w-full')}
               />
-              <Button variant="soft" onClick={handleSaveGateway} className="titlebar-no-drag">
-                保存
+            </div>
+            <div>
+              <label className="text-sm text-[var(--text-secondary)] mb-2 block">Token</label>
+              <input
+                type="password"
+                value={bootstrapToken}
+                onChange={(e) => setBootstrapToken(e.target.value)}
+                placeholder="留空使用默认 Token"
+                className={cn(inputClass, 'w-full')}
+              />
+            </div>
+            <div className="flex justify-end">
+              <Button variant="soft" onClick={handleSaveConnection} className="titlebar-no-drag">
+                保存并重连
               </Button>
             </div>
           </div>

@@ -145,11 +145,11 @@ Artifact {
 
 ---
 
-## 3. OpenClaw Channel 集成
+## 3. OpenClaw Gateway 集成
 
-### 3.1 插件与 OpenClaw 的协作机制
+### 3.1 Gateway-Only 架构
 
-ClawWork 由两个独立进程组成，通过 WebSocket 协作：
+ClawWork 通过单一 WebSocket 连接与 OpenClaw Gateway (:18789) 通信：
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
@@ -160,163 +160,33 @@ ClawWork 由两个独立进程组成，通过 WebSocket 协作：
 │  │ (Node.js 进程)       │  WS  │ (Electron 进程)          │  │
 │  │                     │◄────►│                          │  │
 │  │ ┌─────────────────┐ │      │  React UI + SQLite       │  │
-│  │ │ Gateway :18789  │ │      │                          │  │
-│  │ │ Agent Engine    │ │      └──────────────────────────┘  │
-│  │ │                 │ │                                    │
-│  │ │ ┌─────────────┐ │ │  ← 这个 plugin 运行在 OpenClaw 内部│
-│  │ │ │ clawwork    │ │ │     不是运行在 Electron 里          │
-│  │ │ │ channel     │ │ │                                    │
-│  │ │ │ plugin      │ │ │                                    │
-│  │ │ └─────────────┘ │ │                                    │
-│  │ └─────────────────┘ │                                    │
+│  │ │ Gateway :18789  │ │      │  Git Repo (产物版本化)     │  │
+│  │ │ Agent Engine    │ │      │                          │  │
+│  │ └─────────────────┘ │      └──────────────────────────┘  │
 │  └─────────────────────┘                                    │
 └─────────────────────────────────────────────────────────────┘
 ```
 
-**关键理解：Channel Plugin 是 OpenClaw 侧的代码，不是 Electron 侧的代码。** 它告诉 OpenClaw "当 Agent 要给用户发消息时，通过 WebSocket 推给 ClawWork App"。
+Desktop 作为 Gateway WebSocket 客户端，使用 JSON-RPC 风格帧格式通信：
 
-#### Plugin 安装与加载流程
+**出站（Desktop → Gateway）：**
 
-**Step 1：创建 Plugin 项目**
+| RPC 方法 | 用途 |
+|---|---|
+| `chat.send` | 发送用户消息 (`sessionKey` + `message` + `idempotencyKey`, `deliver: false`) |
+| `chat.history` | 拉取 session 历史消息 |
+| `sessions.list` | 列出所有 session |
 
-```
-openclaw-channel-clawwork/
-├── package.json              # 声明 openclaw.extensions 入口
-├── openclaw.plugin.json      # 插件元数据（id, name, version）
-├── src/
-│   └── index.ts              # register() 入口函数
-└── tsconfig.json
-```
+**入站（Gateway → Desktop 事件）：**
 
-`package.json` 关键配置：
+| event | 用途 |
+|---|---|
+| `chat` | Agent 文本回复 (`payload.message.content[]`) |
+| `agent` | 工具调用事件 (需 `caps:["tool-events"]`) |
 
-```json
-{
-  "name": "openclaw-channel-clawwork",
-  "type": "module",
-  "openclaw": {
-    "extensions": ["./src/index.ts"]
-  }
-}
-```
+**连接握手**：Gateway 先发 `connect.challenge`（含 nonce），客户端回复 `connect` 请求（protocol=3, client.id=`gateway-client`, mode=`backend`）。
 
-`openclaw.plugin.json`：
-
-```json
-{
-  "id": "clawwork",
-  "name": "ClawWork Desktop Channel",
-  "version": "0.1.0",
-  "description": "OpenClaw channel plugin for ClawWork desktop client"
-}
-```
-
-**Step 2：安装到 OpenClaw**
-
-```bash
-# 开发阶段：用 symlink 安装（代码修改即时生效，无需重复安装）
-openclaw plugins install -l ./openclaw-channel-clawwork
-
-# 发布后：从 npm 安装
-openclaw plugins install openclaw-channel-clawwork
-```
-
-安装后插件被放到 `~/.openclaw/extensions/clawwork/`（symlink 模式下是软链接）。
-
-**Step 3：配置启用**
-
-在 OpenClaw 配置文件（`openclaw.yaml` 或 `openclaw.json`）中添加：
-
-```yaml
-channels:
-  clawwork:
-    accounts:
-      default:
-        enabled: true
-        # ClawWork App 的 WebSocket 监听地址（App 启动后提供）
-        wsEndpoint: "ws://127.0.0.1:13579"
-```
-
-**Step 4：启动流程**
-
-```
-1. 用户启动 OpenClaw Server（openclaw gateway start）
-   → Gateway 扫描 ~/.openclaw/extensions/
-   → 发现 clawwork plugin，通过 jiti 直接加载 TypeScript
-   → 调用 register(api)，注册 channel
-
-2. 用户启动 ClawWork Desktop App
-   → App 启动 WebSocket Server（监听 :13579）
-   → 同时作为 WebSocket Client 连接 Gateway（:18789）
-   → 握手完成，双向通信建立
-
-3. 用户在 ClawWork 中发消息
-   → App 通过 WS 发送到 Gateway
-   → Gateway 路由到 Agent Engine
-   → Agent 处理后调用 plugin 的 sendText()
-   → Plugin 通过 WS 推送到 App
-   → App 渲染消息
-```
-
-**开发期间的迭代流程**：
-
-```
-修改 plugin 代码 → openclaw gateway restart → 变更生效
-（-l symlink 安装，无需重新 install）
-```
-
-> **注意**：OpenClaw 使用 jiti 在运行时直接加载 TypeScript，开发期间不需要编译。只有发布到 npm 时才需要 `tsc` 编译。
-
-#### Plugin 核心代码结构
-
-```typescript
-// src/index.ts
-export default function register(api: PluginAPI) {
-  api.registerChannel({
-    id: 'clawwork',
-    label: 'ClawWork Desktop',
-
-    outbound: {
-      // Agent 发文本消息时调用
-      sendText: async (ctx) => {
-        // ctx 包含 sessionKey, text 等
-        // 通过 WebSocket 推送给 ClawWork App
-        wsConnection.send(JSON.stringify({
-          type: 'message',
-          sessionKey: ctx.sessionKey,
-          content: ctx.text,
-        }));
-      },
-
-      // Agent 发文件时调用
-      sendMedia: async (ctx) => {
-        // ctx 包含 sessionKey, mediaPath 等
-        wsConnection.send(JSON.stringify({
-          type: 'media',
-          sessionKey: ctx.sessionKey,
-          mediaPath: ctx.mediaPath,
-          mediaType: ctx.mediaType,
-        }));
-      },
-    },
-
-    status: {
-      // Gateway 定期调用，检查 ClawWork App 是否在线
-      check: async () => ({
-        connected: wsConnection.readyState === WebSocket.OPEN,
-      }),
-    },
-  });
-}
-```
-
-需要实现的核心适配器：
-
-| 适配器 | 职责 | 实现要点 |
-|--------|------|----------|
-| `outbound.sendText` | Agent 文本消息 → ClawWork App | 通过 WS 推送，携带 sessionKey |
-| `outbound.sendMedia` | Agent 产物文件 → ClawWork App | 通过 WS 发送 mediaPath（同机部署） |
-| `status.check` | 连接健康监控 | 检查 WS 连接状态 |
+> 历史说明：早期版本设计了 Desktop↔Channel Plugin 双通道架构（Plugin 运行在 OpenClaw 内部，通过 :13579 WS 与 Desktop 通信）。经验证 Gateway 单通道已能完成完整对话流 + 工具调用事件，双通道架构已在 Gateway-Only 重构（G1-G9）中完全移除。`packages/channel-plugin` 代码仍在仓库中但已从 workspace 排除。
 
 ### 3.2 Session 机制与多任务并行
 
@@ -356,7 +226,7 @@ Gateway 通过 WebSocket 广播所有 session 的事件（已知设计：不做 
 
 - 创建：用户新建 Task 时自动创建
 - 维持：session 在两次消息之间自然休眠，不消耗 Gateway 资源
-- 重置：OpenClaw 默认每天 4:00 AM 重置 session。ClawWork应禁用自动重置（通过 channel plugin 配置），让 Task 的对话上下文长期保持
+- 重置：OpenClaw 默认每天 4:00 AM 重置 session。ClawWork 应通过服务端配置禁用自动重置，让 Task 的对话上下文长期保持
 - 持久化：Gateway 将对话记录存储为 `.jsonl` 格式的 transcript 文件（`~/.openclaw/agents/<agentId>/sessions/<sessionId>.jsonl`），客户端同时在本地 SQLite 保存一份用于离线查看和搜索
 
 ### 3.3 通信架构
@@ -365,11 +235,11 @@ Gateway 通过 WebSocket 广播所有 session 的事件（已知设计：不做 
 ┌──────────────────┐        WebSocket         ┌──────────────────┐
 │  Desktop Client  │ ◄────────────────────►   │  OpenClaw Server │
 │  (Electron App)  │                          │  (Gateway:18789) │
-│                  │   1. 用户发消息（带 sessionKey）│                │
-│  Task A ─┐      │   2. ← Agent 响应（带 sessionKey）│              │
-│  Task B ─┤ mux  │   3. ← 工具调用进度       │  - Agent Engine  │
-│  Task C ─┘      │   4. ← 产物推送           │  - Channel Plugin│
-│  (并行执行)      │                          │  - Gateway WS    │
+│                  │   1. chat.send (sessionKey)│                │
+│  Task A ─┐      │   2. ← chat event (回复)  │                  │
+│  Task B ─┤ mux  │   3. ← agent event (工具) │  - Agent Engine  │
+│  Task C ─┘      │   4. ← artifact 路径      │  - Gateway WS    │
+│  (并行执行)      │                          │                  │
 │                  │   客户端按 sessionKey     │                  │
 │  - Local SQLite  │   分发到对应 Task         │  session 间并行  │
 │  - Git Repo      │                          │  session 内串行  │
@@ -378,41 +248,19 @@ Gateway 通过 WebSocket 广播所有 session 的事件（已知设计：不做 
 
 **消息流：**
 
-1. **用户 → Agent**：ClawWork通过 WebSocket 发送消息，携带目标 Task 的 sessionKey
-2. **Agent → 用户**：OpenClaw 通过 channel plugin 的 `sendText()` 回调推送，客户端按 sessionKey 路由到对应 Task
-3. **工具调用**：Agent 执行工具时，进度通过 streaming 实时推送（同样携带 sessionKey）
-4. **产物处理**：Agent 生成的文件通过 `sendMedia()` 回调处理（见 3.4 文件传输设计）
+1. **用户 → Agent**：ClawWork 通过 `chat.send` RPC 发送消息，携带目标 Task 的 sessionKey + idempotencyKey
+2. **Agent → 用户**：Gateway 通过 `chat` event 推送 Agent 回复，客户端按 sessionKey 路由到对应 Task
+3. **工具调用**：Agent 执行工具时，进度通过 `agent` event 实时推送（需 `caps:["tool-events"]`）
+4. **产物处理**：artifact 文件通过本地路径复制到 workspace 产物目录（见 3.4 文件传输设计）
 
 ### 3.4 文件传输设计
 
-**已确认：OpenClaw `ChannelOutboundAdapter` 提供三个出站方法：**
-
-| 方法 | 用途 |
-|------|------|
-| `sendText(ctx)` | 文本消息 |
-| `sendMedia(ctx)` | 文件/图片，ctx 包含 `mediaPath`（服务端本地文件路径） |
-| `sendPayload(ctx)` | 自定义平台特定载荷 |
-
-**现有渠道的文件传输模式（参考先行者）：**
-
-OpenClaw 统一将 Agent 产物以 `mediaPath`（服务端本地路径）交给 channel plugin，由 plugin 负责"最后一公里"投递：
-
-- **飞书**：plugin 读取 `mediaPath` → 调用飞书 `POST /open-apis/im/v1/files` 上传 → 拿到 `file_key` → 通过 `POST /open-apis/im/v1/messages` 发送给用户。图片同理（先上传拿 `image_key`）。
-- **Telegram**：plugin 读取 `mediaPath` → 通过 `multipart/form-data` 直接上传到 Telegram `sendDocument` / `sendPhoto` API。最大 50MB。
-- **DingTalk**：plugin 读取 `mediaPath` → 上传到钉钉媒体 API → 发送消息卡片。
-
-**共同模式：plugin 从本地读文件 → 上传到目标平台 → 发送消息引用。**
-
-**ClawWork的文件传输方案：**
-
-由于 ClawWork 不是第三方 IM 平台，不需要"上传到平台"这一步。方案按部署场景分两种：
+MVP 只做同机部署：artifact 文件通过本地路径直接复制到 workspace 产物目录。
 
 | 场景 | 方案 | 说明 |
 |------|------|------|
-| **同机部署（MVP）** | 直接传路径 | `sendMedia` 时通过 WebSocket 发送 `mediaPath`，ClawWork 直接读本地文件并复制到 Task 产物目录 |
-| **远程部署（后续）** | 三方存储中转 | Channel plugin 将产物上传到三方存储（WebDAV / S3 / MinIO），ClawWork 从存储服务下载。不自建文件服务，复用现有基础设施 |
-
-MVP 只实现**同机部署**。远程部署不在 MVP 范围，后续通过可插拔的存储后端支持：
+| **同机部署（MVP）** | 直接传路径 | Agent 产物通过 `mediaPath` 传递，ClawWork 直接读本地文件并复制到 Task 产物目录 |
+| **远程部署（后续）** | 三方存储中转 | 产物上传到三方存储（WebDAV / S3 / MinIO），ClawWork 从存储服务下载 |
 
 ```
 本地路径（同机） ← MVP 默认
@@ -421,7 +269,7 @@ WebDAV（自建 NAS / Nextcloud 等）
 S3-compatible（AWS S3 / MinIO / Cloudflare R2）
 ```
 
-> **注意**：OpenClaw 近期（v2026.3.2）加强了 `mediaLocalRoots` 安全校验，channel plugin 必须正确传播 `mediaLocalRoots` 参数，否则文件发送会报 `LocalMediaAccessError("path-not-allowed")`。参见 issue [#20258] 和 [#36477]。
+> **注意**：OpenClaw 近期（v2026.3.2）加强了 `mediaLocalRoots` 安全校验。参见 issue [#20258] 和 [#36477]。
 
 ### 3.5 已确认技术细节 + 待确认问题
 
@@ -431,14 +279,15 @@ S3-compatible（AWS S3 / MinIO / Cloudflare R2）
 2. **Chat 事件 payload 结构**：`payload.message.content[]`（不是 `payload.content[]`）。content 是数组，支持 `text`、`thinking`、`toolCall` 三种 block 类型
 3. **有效 Client ID/Mode**：Electron 使用 `client.id="gateway-client"` + `mode="backend"`。避免 `openclaw-control-ui`（会触发浏览器 origin 检查）
 4. **广播过滤**：客户端侧按 sessionKey 过滤是当前可行方案（Gateway 暂无 session 级过滤计划）
+5. **Gateway-Only 架构可行**：Gateway 单通道已能完成完整对话流 + 工具调用事件，无需 Channel Plugin 双通道
 
 **待确认：**
 
 1. ~~Gateway 协议细节~~ → 已逆向完整协议
-2. **Session 自动重置禁用**：如何在 channel plugin 级别禁用 4:00 AM 自动重置
+2. **Session 自动重置禁用**：如何在服务端配置禁用 4:00 AM 自动重置
 3. **WebSocket 重连后的 session 恢复**：断线重连后通过 `chat.history` RPC 可补齐历史消息
 4. **`mediaLocalRoots` 配置**：ClawWork 场景下如何正确配置
-5. ~~Channel Plugin 验证问题~~ → T1-6 延后，当前通过 Gateway 直连绕过
+5. ~~Channel Plugin 验证问题~~ → Gateway-Only 架构已绕过
 6. ~~广播过滤~~ → 客户端侧过滤已实现
 
 ---
@@ -600,14 +449,13 @@ S3-compatible（AWS S3 / MinIO / Cloudflare R2）
 
 #### 1.1 项目初始化（可并行）
 
-- [x] **T1-0** 初始化 monorepo 骨架：pnpm workspace + `packages/shared` + `packages/channel-plugin` + `packages/desktop` 三个包 + tsconfig.base.json
-  - ✅ Check：`pnpm install` 成功，三个包互相引用类型不报错
+- [x] **T1-0** 初始化 monorepo 骨架：pnpm workspace + `packages/shared` + `packages/desktop` + tsconfig.base.json
+  - ✅ Check：`pnpm install` 成功，包互相引用类型不报错
 - [x] **T1-1** `packages/desktop`：用 electron-vite 初始化 Electron 应用（React 19 + TS + Tailwind v4）
   - ✅ Check：`pnpm --filter @clawwork/desktop dev` 能启动空白 Electron 窗口
-- [x] **T1-2** `packages/channel-plugin`：初始化 Channel Plugin，含 `openclaw.plugin.json` + `register()` 入口
-  - ✅ Check：`openclaw plugins install -l ./packages/channel-plugin` 成功，能被 OpenClaw 加载（即使报校验警告）
-- [x] **T1-3** `packages/shared`：定义 WsMessage 协议类型 + Task/Message/Artifact 类型（Drizzle ORM + SQLite 延后到 Phase 3）
-  - ✅ Check：两个包都能 import `@clawwork/shared` 的类型
+- [x] **T1-2** ~~`packages/channel-plugin`~~ (已在 Gateway-Only 重构中移除，代码保留但不参与构建)
+- [x] **T1-3** `packages/shared`：定义 Gateway 协议类型 + Task/Message/Artifact 类型
+  - ✅ Check：desktop 包能 import `@clawwork/shared` 的类型
 
 #### 1.2 三栏布局骨架
 
@@ -616,10 +464,8 @@ S3-compatible（AWS S3 / MinIO / Cloudflare R2）
 - [x] **T1-5** Left Nav：静态结构（New Task 按钮 + Search 入口 + Files 入口 + 空 Task 列表 + Settings 入口）
   - ✅ Check：所有按钮可点击，console.log 确认事件绑定
 
-#### 1.3 OpenClaw 通信链路（T1-1 和 T1-2 完成后）
+#### 1.3 OpenClaw 通信链路
 
-- [ ] **T1-6** Channel Plugin：实现 `ClawWorkOutboundAdapter.sendText()`（延后 — Gateway 直连已足够完成对话闭环）
-  - ✅ Check：OpenClaw Agent 的文本回复能到达 Electron 主进程
 - [x] **T1-7** Electron 主进程：WebSocket 客户端连接 OpenClaw Gateway（ws://127.0.0.1:18789），含 challenge-response 认证
   - ✅ Check：连接建立，心跳正常，断线自动重连
 - [x] **T1-8** 实现消息发送：Electron → Gateway（chat.send），携带 sessionKey + idempotencyKey
@@ -773,8 +619,6 @@ S3-compatible（AWS S3 / MinIO / Cloudflare R2）
   - ✅ Check：M 系列和 Intel Mac 都能安装运行
 - [ ] **T4-6** 应用图标 + 启动画面 + 应用元信息（name/version/description）
   - ✅ Check：dmg 安装后应用图标正确，About 信息完整
-- [ ] **T4-7** Channel Plugin 打包为 npm 包，README 包含安装说明
-  - ✅ Check：`npm install openclaw-channel-clawwork` 后能被 OpenClaw 加载
 
 **Phase 4 验收：生成 .dmg 文件，新用户安装后配置 OpenClaw 地址即可使用**
 
@@ -785,13 +629,12 @@ S3-compatible（AWS S3 / MinIO / Cloudflare R2）
 ```
 Phase 1:
   T1-0 ──→ T1-1 ─────┐
-           T1-2 ─────┤──→ T1-6 → T1-7 → T1-8 → T1-9
-           T1-3 ─────┘
+           T1-3 ─────┘──→ T1-7 → T1-8 → T1-9
            T1-4 ─┬──→ （Phase 2 UI 任务依赖这两个）
            T1-5 ─┘
 
   T1-0 先行（monorepo 骨架，所有后续任务的前置）
-  可并行组：[T1-1, T1-2, T1-3] 同时开 3 个 Agent
+  可并行组：[T1-1, T1-3] 同时开 2 个 Agent
            [T1-4, T1-5] 同时开 2 个 Agent（与上组无依赖也可并行）
 
 Phase 2:
@@ -812,7 +655,7 @@ Phase 3:
 
 Phase 4:
   [T4-1, T4-2, T4-3, T4-4] 全部可并行（4 个 Agent 同时开）
-  T4-5 → T4-6 → T4-7（串行：打包链路）
+  T4-5 → T4-6（串行：打包链路）
 ```
 
 ---
@@ -827,86 +670,61 @@ Phase 4:
 clawwork/
 ├── package.json                 # workspace root
 ├── pnpm-workspace.yaml          # pnpm workspace 配置
-├── turbo.json                   # Turborepo 任务编排（可选）
-├── tsconfig.base.json           # 共享 TS 配置
+├── tsconfig.base.json           # 共享 TS 配置 (ES2022, strict, bundler resolution)
 │
 ├── packages/
-│   ├── shared/                  # 共享类型和常量
-│   │   ├── package.json         # @clawwork/shared
+│   ├── shared/                  # @clawwork/shared — 零依赖类型桥梁
+│   │   ├── package.json
 │   │   └── src/
-│   │       ├── types.ts         # Task, Message, Artifact 类型定义
-│   │       ├── protocol.ts      # WebSocket 消息协议类型
-│   │       └── constants.ts     # sessionKey 格式、事件名等常量
+│   │       ├── types.ts         # Task, Message, Artifact, ToolCall, ProgressStep
+│   │       ├── protocol.ts      # WsMessage 联合类型 + type guards
+│   │       ├── gateway-protocol.ts  # GatewayFrame 类型, GatewayConnectParams
+│   │       ├── constants.ts     # 端口号, buildSessionKey(), parseTaskIdFromSessionKey()
+│   │       └── index.ts         # barrel export
 │   │
-│   ├── channel-plugin/          # OpenClaw Channel Plugin
-│   │   ├── package.json         # openclaw-channel-clawwork
-│   │   ├── openclaw.plugin.json # OpenClaw 插件元数据
-│   │   └── src/
-│   │       ├── index.ts         # register() 入口
-│   │       ├── outbound.ts      # sendText / sendMedia 实现
-│   │       └── ws-server.ts     # Plugin 侧 WebSocket 服务
+│   ├── channel-plugin/          # (已从 workspace 排除，代码保留但不参与构建)
 │   │
-│   └── desktop/                 # Electron 桌面应用
-│       ├── package.json         # @clawwork/desktop
+│   └── desktop/                 # @clawwork/desktop — Electron 桌面应用
+│       ├── package.json
 │       ├── electron.vite.config.ts
-│       ├── src/
-│       │   ├── main/            # Electron 主进程
-│       │   │   ├── index.ts
-│       │   │   ├── ipc/         # IPC handlers
-│       │   │   ├── db/          # SQLite + Drizzle schema
-│       │   │   ├── git/         # simple-git 操作
-│       │   │   └── ws-client.ts # WebSocket 客户端（连 Gateway + Plugin）
-│       │   ├── renderer/        # React 渲染进程
-│       │   │   ├── App.tsx
-│       │   │   ├── layouts/
-│       │   │   │   ├── LeftNav/
-│       │   │   │   ├── MainArea/
-│       │   │   │   └── RightPanel/
-│       │   │   ├── components/
-│       │   │   │   ├── ChatMessage.tsx
-│       │   │   │   ├── TaskList.tsx
-│       │   │   │   ├── FileGrid.tsx
-│       │   │   │   ├── ProgressPanel.tsx
-│       │   │   │   └── ArtifactList.tsx
-│       │   │   ├── stores/      # Zustand stores
-│       │   │   │   ├── taskStore.ts
-│       │   │   │   ├── messageStore.ts
-│       │   │   │   └── uiStore.ts
-│       │   │   └── styles/
-│       │   │       └── theme.css # CSS Variables 主题
-│       │   └── preload/         # Electron preload
-│       └── resources/           # 应用图标等静态资源
-│
-└── .github/                     # CI（可选）
+│       └── src/
+│           ├── main/            # Electron 主进程
+│           │   ├── index.ts     # hiddenInset titleBar, 自动截图
+│           │   ├── ws/
+│           │   │   ├── gateway-client.ts  # GatewayClient: challenge-response auth, heartbeat, reconnect
+│           │   │   ├── window-utils.ts    # BrowserWindow 辅助工具
+│           │   │   └── index.ts           # initWebSockets, getters, destroy
+│           │   └── ipc/
+│           │       └── ws-handlers.ts     # IPC handlers
+│           ├── preload/
+│           │   ├── index.ts     # buildApi() factory, contextBridge
+│           │   └── clawwork.d.ts
+│           └── renderer/        # React 渲染进程
+│               ├── App.tsx      # 三栏布局 (260px | flex | 320px)
+│               ├── stores/      # Zustand stores (taskStore, messageStore, uiStore)
+│               ├── styles/      # theme.css + design-tokens.ts
+│               ├── lib/         # utils.ts, session-sync.ts
+│               ├── components/  # ChatMessage, ChatInput, StreamingMessage, ToolCallCard, FileCard, FilePreview
+│               │   └── ui/      # shadcn/ui 基础组件
+│               ├── hooks/       # useGatewayDispatcher, useTheme
+│               └── layouts/     # LeftNav/, MainArea/, RightPanel/, FileBrowser/, Settings/, Setup/
 ```
 
 **`pnpm-workspace.yaml`：**
 
 ```yaml
 packages:
-  - 'packages/*'
+  - 'packages/shared'
+  - 'packages/desktop'
 ```
 
 **包间依赖关系：**
 
 ```
-@clawwork/shared        ← 被其他两个包引用，零依赖
-     ↑          ↑
-     │          │
-channel-plugin  @clawwork/desktop
-（部署到 OpenClaw）  （Electron 应用）
+@clawwork/shared ← @clawwork/desktop
 ```
 
-`@clawwork/shared` 是类型桥梁，确保 Plugin 发出的 WebSocket 消息和 Desktop 接收的消息类型一致：
-
-```typescript
-// packages/shared/src/protocol.ts
-export type WsMessage =
-  | { type: 'text'; sessionKey: string; content: string }
-  | { type: 'media'; sessionKey: string; mediaPath: string; mediaType: string }
-  | { type: 'tool_call'; sessionKey: string; toolName: string; status: 'running' | 'done' | 'error' }
-  | { type: 'heartbeat' }
-```
+`@clawwork/shared` 是类型桥梁，定义 Gateway 通信的类型和 Desktop 使用的数据模型。`composite: true` + `references` 确保跨包类型安全。
 
 **常用开发命令：**
 
@@ -917,15 +735,12 @@ pnpm install
 # 开发 Desktop App（热更新）
 pnpm --filter @clawwork/desktop dev
 
-# 将 Channel Plugin symlink 安装到 OpenClaw
-openclaw plugins install -l ./packages/channel-plugin
-
-# 同时开发两个包（watch 模式）
-pnpm --filter @clawwork/shared --filter @clawwork/desktop dev
+# 类型检查（tsc 只在 desktop/node_modules 下）
+packages/desktop/node_modules/.bin/tsc -b packages/shared/tsconfig.json
+packages/desktop/node_modules/.bin/tsc --noEmit -p packages/desktop/tsconfig.json
 
 # 打包
 pnpm --filter @clawwork/desktop build
-pnpm --filter openclaw-channel-clawwork build
 ```
 
 ### 6.2 技术栈总览
@@ -934,23 +749,24 @@ pnpm --filter openclaw-channel-clawwork build
 clawwork (pnpm monorepo)
 ├── @clawwork/shared            # 共享类型 + 协议定义
 │   └── TypeScript 5.x
-├── openclaw-channel-clawwork    # OpenClaw Channel Plugin
-│   └── TypeScript（jiti 直接加载，开发期免编译）
 ├── @clawwork/desktop            # Electron 桌面应用
 │   ├── 渲染进程
 │   │   ├── React 19 + TypeScript 5.x
 │   │   ├── Zustand 5（状态管理：taskStore, messageStore, uiStore）
+│   │   ├── shadcn/ui (Radix UI + cva + tailwind-merge)
+│   │   ├── Framer Motion（动画）
 │   │   ├── Tailwind CSS v4 + CSS Variables（主题）
 │   │   └── react-markdown + rehype-highlight（Markdown 渲染）
 │   ├── 主进程
-│   │   ├── ws（WebSocket 客户端 → Gateway）
-│   │   ├── better-sqlite3 + Drizzle ORM（计划 Phase 3）
-│   │   └── simple-git（计划 Phase 3）
+│   │   ├── ws/（GatewayClient → Gateway :18789）
+│   │   ├── better-sqlite3 + Drizzle ORM
+│   │   └── simple-git
 │   ├── 构建：Vite 6 + electron-vite 3
 │   └── 打包：electron-builder（macOS Universal Binary）
 └── 工具链
     ├── pnpm 10 workspace（monorepo 管理）
-    └── lucide-react（图标）
+    ├── lucide-react（图标）
+    └── Inter Variable + JetBrains Mono（字体）
 ```
 
 ### 6.3 UI 组件选型
@@ -990,19 +806,20 @@ clawwork (pnpm monorepo)
 
 ## 7. 关键设计决策记录
 
-### ADR-001：为什么自建 Channel 而不走飞书
+### ADR-001：为什么走 Gateway-Only 而不是 Channel Plugin
 
-**决策**：开发 OpenClaw 自定义 Channel Plugin，而非通过飞书渠道中转。
+**决策**：通过 Gateway WebSocket 直连实现完整对话流，不使用 Channel Plugin 双通道。
 
 **原因**：
-- 飞书是中间层，增加延迟和复杂度
-- 飞书 API 限制（消息长度、富文本格式、文件大小等）会约束 AI 响应的展示能力
-- 自建 channel 可以完全控制消息格式、工具调用展示、产物处理等
-- OpenClaw Plugin SDK 明确支持此用法，社区已有 DingTalk 等先例
+- Gateway 单通道已能完成完整对话（`chat.send` + `chat`/`agent` events），无需额外 Plugin 层
+- 减少一个进程间通信通道，降低架构复杂度和排障成本
+- 避免 Channel Plugin 校验 bug（[#12484]）和配置复杂度
+- `deliver: false` 参数确保消息不走外部渠道，只通过 Gateway 事件回传
 
-**风险**：
-- OpenClaw 的 channel 校验有已知 bug（[#12484]），自定义 channel ID 启动时可能报错
-- Gateway 协议文档可能不完整，需要读源码
+**历史**：
+- 早期设计了 Channel Plugin 双通道架构（Plugin 运行在 OpenClaw 内部，通过 :13579 WS 与 Desktop 通信）
+- 实现过程中发现 Gateway 单通道已够用，在 Gateway-Only 重构（G1-G9）中移除了 Plugin 依赖
+- `packages/channel-plugin` 代码保留但已从 workspace 排除
 
 ### ADR-002：为什么用 Git Repo 而不是纯 SQLite
 
@@ -1023,7 +840,7 @@ clawwork (pnpm monorepo)
 **决策**：使用 Electron。
 
 **原因**：
-- OpenClaw Channel Plugin 本身是 TypeScript 生态，Electron 技术栈一致
+- OpenClaw 本身是 TypeScript 生态，Electron 技术栈一致
 - shadcn/ui、React 生态成熟，组件复用性高
 - Electron 的 node 集成让 SQLite、git 操作、文件系统访问更直接
 - 对于需要重度 UI 交互的三栏布局应用，Electron 的 Chromium 渲染引擎更稳定
@@ -1039,13 +856,11 @@ clawwork (pnpm monorepo)
 | 风险 | 影响 | 缓解措施 |
 |------|------|----------|
 | OpenClaw Gateway 协议文档不完整 | 阻塞 Phase 1 | 先读源码，参考 feishu plugin 实现反推 |
-| Channel Plugin 校验 bug [#12484] | 自定义 channel 启动报错 | 跟进 issue，必要时 fork 修复 |
 | Gateway 广播所有 session 事件 [#32579] | 客户端收到无关 session 的消息，增加过滤开销 | 客户端侧按 sessionKey 过滤，性能影响可控 |
-| `mediaLocalRoots` 安全校验 [#20258] [#36477] | 文件发送被拒绝 | channel plugin 正确传播 mediaLocalRoots 参数 |
-| Session 4AM 自动重置 | 长期 Task 对话上下文被清空 | channel plugin 配置禁用自动重置，或接管重置策略 |
-| Streaming 响应实现复杂度 | 对话体验差 | 先实现非 streaming，再迭代 |
+| `mediaLocalRoots` 安全校验 [#20258] [#36477] | 文件发送被拒绝 | 正确配置 mediaLocalRoots 参数 |
+| Session 4AM 自动重置 | 长期 Task 对话上下文被清空 | 服务端配置禁用自动重置 |
 | Git auto-commit 性能 | 大量小文件时 commit 慢 | 批量 commit + debounce |
-| macOS 签名和公证 | 用户无法安装 | Phase 3 处理，开发阶段用 ad-hoc 签名 |
+| macOS 签名和公证 | 用户无法安装 | Phase 4 处理，开发阶段用 ad-hoc 签名 |
 
 ---
 
@@ -1059,13 +874,12 @@ clawwork (pnpm monorepo)
 - Session 压缩与持久化：https://docs.openclaw.ai/reference/session-management-compaction
 - 命令队列系统：https://docs.openclaw.ai/concepts/queue
 
-**Channel Plugin 参考实现：**
+**Channel Plugin 参考实现（历史参考）：**
 - 飞书 Plugin：https://github.com/xzq-xu/openclaw-plugin-feishu
 - DingTalk Plugin：https://github.com/soimy/openclaw-channel-dingtalk
 - Channel Plugin 开发指南：https://zread.ai/openclaw/openclaw/16-channel-plugin-development
 
 **已知 Issue（需跟进）：**
-- Channel ID 校验：https://github.com/openclaw/openclaw/issues/12484
 - sendMedia mediaLocalRoots：https://github.com/openclaw/openclaw/issues/20258
 - Slack mediaLocalRoots 回归：https://github.com/openclaw/openclaw/issues/36477
 - Gateway 广播无 session 过滤：https://github.com/openclaw/openclaw/issues/32579

@@ -5,21 +5,23 @@
 /** Default OpenClaw Gateway WebSocket port */
 export const GATEWAY_WS_PORT = 18789;
 
-/** Default ClawWork Plugin WebSocket port */
-export const PLUGIN_WS_PORT = 13579;
+/** ClawWork session key prefix: agent:main:clawwork:task: */
+export const SESSION_KEY_PREFIX = 'agent:main:clawwork:task:';
 
-/** Session key prefix format: agent:<agentId>:<taskId> */
-export const SESSION_KEY_PREFIX = 'agent';
-
-/** Build a session key from agentId and taskId */
-export function buildSessionKey(agentId: string, taskId: string): string {
-  return `${SESSION_KEY_PREFIX}:${agentId}:task-${taskId}`;
+/** Build a session key from taskId (fixed to main agent) */
+export function buildSessionKey(taskId: string): string {
+  return `${SESSION_KEY_PREFIX}${taskId}`;
 }
 
-/** Extract taskId from a session key */
+/** Extract taskId from a ClawWork session key */
 export function parseTaskIdFromSessionKey(sessionKey: string): string | null {
-  const match = sessionKey.match(/^agent:[^:]+:task-(.+)$/);
-  return match ? match[1] : null;
+  if (!sessionKey.startsWith(SESSION_KEY_PREFIX)) return null;
+  return sessionKey.slice(SESSION_KEY_PREFIX.length) || null;
+}
+
+/** Check if a session key belongs to ClawWork */
+export function isClawWorkSession(sessionKey: string): boolean {
+  return sessionKey.startsWith(SESSION_KEY_PREFIX);
 }
 
 /** Heartbeat interval in milliseconds */

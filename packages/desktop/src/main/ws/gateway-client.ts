@@ -11,6 +11,8 @@ import type {
   GatewayReqFrame,
   GatewayResFrame,
   GatewayConnectParams,
+  GatewayClientConfig,
+  GatewayAuth,
 } from '@clawwork/shared';
 import type { BrowserWindow } from 'electron';
 import { sendToWindow } from './window-utils.js';
@@ -32,17 +34,16 @@ export class GatewayClient {
   private heartbeatTimer: ReturnType<typeof setInterval> | null = null;
   private pendingRequests = new Map<string, PendingReq>();
   private destroyed = false;
+  private wsUrl: string;
+  private auth: GatewayAuth;
 
-  constructor(
-    private readonly token: string,
-    private host = '127.0.0.1',
-    private port = GATEWAY_WS_PORT,
-  ) {}
+  constructor(config: GatewayClientConfig) {
+    this.wsUrl = config.url;
+    this.auth = config.auth;
+  }
 
-  /** Update server URL and reconnect */
-  updateUrl(host: string, port: number): void {
-    this.host = host;
-    this.port = port;
+  updateUrl(url: string): void {
+    this.wsUrl = url;
     this.reconnectAttempts = 0;
     this.connect();
   }
@@ -55,9 +56,8 @@ export class GatewayClient {
     if (this.destroyed) return;
     this.cleanup();
 
-    const url = `ws://${this.host}:${this.port}`;
-    console.log(`[gateway] connecting to ${url}`);
-    this.ws = new WebSocket(url);
+    console.log(`[gateway] connecting to ${this.wsUrl}`);
+    this.ws = new WebSocket(this.wsUrl);
 
     this.ws.on('open', () => {
       console.log('[gateway] ws open, waiting for challenge...');
@@ -128,8 +128,8 @@ export class GatewayClient {
         platform: process.platform,
         mode: 'backend',
       },
-      caps: [],
-      auth: { token: this.token },
+      caps: ['tool-events'],
+      auth: this.auth,
       role: 'operator',
       scopes: ['operator.admin', 'operator.approvals', 'operator.pairing'],
     };
@@ -194,6 +194,10 @@ export class GatewayClient {
       idempotencyKey: randomUUID(),
       deliver: false,
     });
+  }
+
+  async abortChat(sessionKey: string): Promise<Record<string, unknown>> {
+    return this.sendReq('chat.abort', { sessionKey });
   }
 
   async getChatHistory(sessionKey: string, limit = 50): Promise<Record<string, unknown>> {

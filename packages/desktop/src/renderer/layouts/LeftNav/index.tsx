@@ -28,7 +28,6 @@ export default function LeftNav() {
   const settingsOpen = useUiStore((s) => s.settingsOpen)
   const setSettingsOpen = useUiStore((s) => s.setSettingsOpen)
   const gwStatus = useUiStore((s) => s.gatewayStatus)
-  const pluginStatus = useUiStore((s) => s.pluginStatus)
 
   const { items, isOpen, openMenu, closeMenu } = useTaskContextMenu(updateTaskStatus)
   const [menuPos, setMenuPos] = useState<{ x: number; y: number } | null>(null)
@@ -150,7 +149,7 @@ export default function LeftNav() {
       </div>
 
       <div className="flex-shrink-0 px-4 py-3 border-t border-[var(--border)] space-y-1">
-        <ConnectionStatus gatewayStatus={gwStatus} pluginStatus={pluginStatus} />
+        <ConnectionStatus gatewayStatus={gwStatus} />
         <Tooltip>
           <TooltipTrigger asChild>
             <button

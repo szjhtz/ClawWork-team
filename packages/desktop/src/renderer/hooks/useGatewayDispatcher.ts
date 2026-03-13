@@ -1,11 +1,10 @@
 import { useEffect, useRef } from 'react';
 import { parseTaskIdFromSessionKey } from '@clawwork/shared';
-import type { WsMessage } from '@clawwork/shared';
 import { toast } from 'sonner';
 import { useMessageStore } from '../stores/messageStore';
 import { useTaskStore } from '../stores/taskStore';
 import { useUiStore } from '../stores/uiStore';
-import { getAgentMessageActions } from '../lib/agent-message';
+import { hydrateFromLocal, syncFromGateway } from '../lib/session-sync';
 
 interface ChatContentBlock {
   type: string;
@@ -22,11 +21,21 @@ interface ChatEventPayload {
   sessionKey: string;
   runId?: string;
   state?: 'delta' | 'final' | 'aborted' | 'error';
-  /** Gateway wraps content blocks inside message */
   message?: ChatMessage;
-  /** Fallback: top-level content (older protocol?) */
   content?: ChatContentBlock[];
   text?: string;
+}
+
+interface AgentToolEvent {
+  sessionKey: string;
+  runId?: string;
+  stream?: string;
+  tool?: {
+    name: string;
+    status: 'running' | 'done' | 'error';
+    args?: string;
+    result?: string;
+  };
 }
 
 /**
@@ -43,16 +52,20 @@ export function useGatewayEventDispatcher(): void {
 
   useEffect(() => {
     const handler = (data: { event: string; payload: Record<string, unknown> }): void => {
-      if (data.event !== 'chat') return;
+      if (data.event === 'chat') {
+        handleChatEvent(data.payload as unknown as ChatEventPayload);
+      } else if (data.event === 'agent') {
+        handleAgentEvent(data.payload as unknown as AgentToolEvent);
+      }
+    };
 
-      const payload = data.payload as unknown as ChatEventPayload;
+    function handleChatEvent(payload: ChatEventPayload): void {
       const { sessionKey, state } = payload;
       if (!sessionKey) return;
 
       const taskId = parseTaskIdFromSessionKey(sessionKey);
       if (!taskId) return;
 
-      // Mark unread if this is a background task
       if (taskId !== activeTaskId) {
         markUnread(taskId);
       }
@@ -75,7 +88,24 @@ export function useGatewayEventDispatcher(): void {
           addMessage(taskId, 'system', errText);
         }
       }
-    };
+    }
+
+    function handleAgentEvent(payload: AgentToolEvent): void {
+      const { sessionKey, stream, tool } = payload;
+      if (stream !== 'tool' || !tool || !sessionKey) return;
+
+      const taskId = parseTaskIdFromSessionKey(sessionKey);
+      if (!taskId) return;
+
+      if (taskId !== activeTaskId) {
+        markUnread(taskId);
+      }
+
+      const toolText = formatToolEvent(tool);
+      if (tool.status === 'running') {
+        addMessage(taskId, 'system', toolText);
+      }
+    }
 
     window.clawwork.onGatewayEvent(handler);
     return () => {
@@ -83,64 +113,33 @@ export function useGatewayEventDispatcher(): void {
     };
   }, [activeTaskId, addMessage, appendStreamDelta, finalizeStream, markUnread, updateTaskTitle]);
 
+  // Hydrate tasks + messages from local SQLite on mount
   useEffect(() => {
-    const handler = (msg: WsMessage): void => {
-      const actions = getAgentMessageActions(msg, activeTaskId);
-      for (const action of actions) {
-        switch (action.type) {
-          case 'markUnread':
-            markUnread(action.taskId);
-            break;
-          case 'addMessage':
-            addMessage(action.taskId, action.role, action.content);
-            break;
-          case 'appendStreamDelta':
-            useMessageStore.getState().setProcessing(action.taskId, false);
-            appendStreamDelta(action.taskId, action.delta);
-            break;
-          case 'finalizeStream':
-            useMessageStore.getState().setProcessing(action.taskId, false);
-            finalizeStream(action.taskId);
-            break;
-          case 'saveMedia': {
-            const msgId = crypto.randomUUID();
-            addMessage(
-              action.taskId,
-              'assistant',
-              `![${action.fileName ?? 'media'}](clawwork-media://${action.mediaPath})`,
-            );
-            window.clawwork.saveArtifact({
-              taskId: action.taskId,
-              sourcePath: action.mediaPath,
-              messageId: msgId,
-              fileName: action.fileName,
-              mediaType: action.mediaType,
-            });
-            break;
-          }
-        }
-      }
-    };
-
-    window.clawwork.onAgentMessage(handler);
-    return () => {
-      window.clawwork.removeAllListeners('agent-message');
-    };
-  }, [activeTaskId, addMessage, appendStreamDelta, finalizeStream, markUnread]);
+    hydrateFromLocal();
+  }, []);
 
   const wasConnectedRef = useRef(true);
+  const syncedRef = useRef(false);
   useEffect(() => {
     const setGwStatus = useUiStore.getState().setGatewayStatus;
     window.clawwork.gatewayStatus().then((s) => {
       const status = s.connected ? 'connected' as const : 'disconnected' as const;
       setGwStatus(status);
       wasConnectedRef.current = s.connected;
+      if (s.connected && !syncedRef.current) {
+        syncedRef.current = true;
+        syncFromGateway();
+      }
     });
     window.clawwork.onGatewayStatus((s) => {
       const next = s.connected ? 'connected' as const : s.error ? 'disconnected' as const : 'connecting' as const;
       setGwStatus(next);
       if (s.connected && !wasConnectedRef.current) {
         toast.success('Gateway reconnected');
+        if (!syncedRef.current) {
+          syncedRef.current = true;
+          syncFromGateway();
+        }
       } else if (!s.connected && wasConnectedRef.current) {
         toast.warning('Gateway disconnected', { description: 'Attempting to reconnect...' });
       }
@@ -148,19 +147,9 @@ export function useGatewayEventDispatcher(): void {
     });
     return () => { window.clawwork.removeAllListeners('gateway-status'); };
   }, []);
-
-  useEffect(() => {
-    const setPluginStatus = useUiStore.getState().setPluginStatus;
-    window.clawwork.onPluginStatus((s) => {
-      const next = s.connected ? 'connected' as const : s.error ? 'disconnected' as const : 'connecting' as const;
-      setPluginStatus(next);
-    });
-    return () => { window.clawwork.removeAllListeners('plugin-status'); };
-  }, []);
 }
 
 function extractText(payload: ChatEventPayload): string {
-  // Gateway wraps content in payload.message.content[]
   const blocks = payload.message?.content ?? payload.content;
   if (blocks) {
     return blocks
@@ -169,6 +158,11 @@ function extractText(payload: ChatEventPayload): string {
       .join('');
   }
   return payload.text ?? '';
+}
+
+function formatToolEvent(tool: { name: string; status: string; args?: string; result?: string }): string {
+  const prefix = tool.status === 'running' ? '🔧' : tool.status === 'done' ? '✅' : '❌';
+  return `${prefix} \`${tool.name}\` — ${tool.status}`;
 }
 
 function autoTitleIfNeeded(
@@ -187,3 +181,5 @@ function autoTitleIfNeeded(
     }
   }
 }
+
+

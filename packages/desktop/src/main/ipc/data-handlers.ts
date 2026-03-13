@@ -1,5 +1,5 @@
 import { ipcMain } from 'electron';
-import { eq } from 'drizzle-orm';
+import { eq, desc } from 'drizzle-orm';
 import { getDb } from '../db/index.js';
 import { tasks, messages } from '../db/schema.js';
 
@@ -83,6 +83,31 @@ export function registerDataHandlers(): void {
       return { ok: true };
     } catch (err) {
       console.error('[data] create-message failed:', err);
+      return ipcError(err);
+    }
+  });
+
+  ipcMain.handle('data:list-tasks', () => {
+    try {
+      const db = getDb();
+      const rows = db.select().from(tasks).orderBy(desc(tasks.createdAt)).all();
+      return { ok: true, rows: rows.map((r) => ({ ...r, tags: JSON.parse(r.tags as string) })) };
+    } catch (err) {
+      console.error('[data] list-tasks failed:', err);
+      return ipcError(err);
+    }
+  });
+
+  ipcMain.handle('data:list-messages', (_event, params: { taskId: string }) => {
+    try {
+      const db = getDb();
+      const rows = db.select().from(messages)
+        .where(eq(messages.taskId, params.taskId))
+        .orderBy(messages.timestamp)
+        .all();
+      return { ok: true, rows };
+    } catch (err) {
+      console.error('[data] list-messages failed:', err);
       return ipcError(err);
     }
   });

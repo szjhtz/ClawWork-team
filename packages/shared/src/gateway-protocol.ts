@@ -30,6 +30,10 @@ export type GatewayFrame =
   | GatewayResFrame
   | GatewayEventFrame;
 
+export type GatewayAuth =
+  | { token: string }
+  | { password: string };
+
 export interface GatewayConnectParams {
   minProtocol: 3;
   maxProtocol: 3;
@@ -41,7 +45,12 @@ export interface GatewayConnectParams {
     mode: 'backend';
   };
   caps: string[];
-  auth: { token: string };
+  auth: GatewayAuth;
   role: 'operator';
   scopes: string[];
+}
+
+export interface GatewayClientConfig {
+  url: string;
+  auth: GatewayAuth;
 }

@@ -12,19 +12,20 @@ function buildApi(): ClawWorkAPI {
       ipcRenderer.invoke('ws:list-sessions'),
     gatewayStatus: () =>
       ipcRenderer.invoke('ws:gateway-status'),
+    syncSessions: () =>
+      ipcRenderer.invoke('ws:sync-sessions'),
 
-    onAgentMessage: (callback) => {
-      ipcRenderer.on('agent-message', (_event, msg) => callback(msg));
-    },
     onGatewayEvent: (callback) => {
       ipcRenderer.on('gateway-event', (_event, data) => callback(data));
     },
     onGatewayStatus: (callback) => {
       ipcRenderer.on('gateway-status', (_event, status) => callback(status));
     },
-    onPluginStatus: (callback) => {
-      ipcRenderer.on('plugin-status', (_event, status) => callback(status));
-    },
+
+    loadTasks: () =>
+      ipcRenderer.invoke('data:list-tasks'),
+    loadMessages: (taskId: string) =>
+      ipcRenderer.invoke('data:list-messages', { taskId }),
 
     saveArtifact: (params: {
       taskId: string;
