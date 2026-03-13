@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react'
+import { useCallback, useEffect, useRef } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { PanelRightOpen } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
@@ -16,6 +16,8 @@ import ThinkingIndicator from '@/components/ThinkingIndicator'
 import ChatInput from '@/components/ChatInput'
 import FileBrowser from '../FileBrowser'
 import logo from '@/assets/logo.png'
+
+const STICK_TO_BOTTOM_THRESHOLD_PX = 60
 
 interface MainAreaProps {
   onTogglePanel: () => void
@@ -103,16 +105,25 @@ function ChatContent() {
   const isProcessing = useMessageStore((s) =>
     activeTaskId ? s.processingTasks.has(activeTaskId) : false,
   )
-  const scrollRef = useRef<HTMLDivElement>(null)
+  const viewportRef = useRef<HTMLDivElement>(null)
+  const stickToBottom = useRef(true)
+
+  const handleScroll = useCallback(() => {
+    const el = viewportRef.current
+    if (!el) return
+    stickToBottom.current =
+      el.scrollHeight - el.scrollTop - el.clientHeight < STICK_TO_BOTTOM_THRESHOLD_PX
+  }, [])
 
   useEffect(() => {
-    const el = scrollRef.current
+    if (!stickToBottom.current) return
+    const el = viewportRef.current
     if (el) el.scrollTop = el.scrollHeight
   }, [messages.length, streamingContent, isProcessing])
 
   return (
     <>
-      <ScrollArea ref={scrollRef} className="flex-1 px-6 py-4">
+      <ScrollArea viewportRef={viewportRef} className="flex-1 px-6 py-4" onScrollCapture={handleScroll}>
         <div className="max-w-3xl mx-auto space-y-1">
           {!activeTask && <WelcomeScreen />}
           {activeTask && messages.length === 0 && !streamingContent && <WelcomeScreen />}
