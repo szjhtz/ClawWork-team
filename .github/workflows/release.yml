@@ -74,3 +74,16 @@ jobs:
           prerelease: ${{ contains(github.ref, '-rc') || contains(github.ref, '-beta') || contains(github.ref, '-alpha') }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  update-homebrew:
+    needs: release
+    if: ${{ !contains(github.ref, '-rc') && !contains(github.ref, '-beta') && !contains(github.ref, '-alpha') }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger Homebrew tap update
+        run: |
+          gh workflow run update-homebrew.yml \
+            --repo clawwork-ai/clawwork \
+            --field tag=${{ github.ref_name }}
+        env:
+          GH_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
