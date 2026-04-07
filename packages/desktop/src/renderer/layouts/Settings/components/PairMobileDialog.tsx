@@ -33,6 +33,7 @@ export default function PairMobileDialog({
   const gatewayStatusMap = useUiStore((s) => s.gatewayStatusMap);
 
   const [selectedGatewayId, setSelectedGatewayId] = useState<string | null>(null);
+  const [shareIdentity, setShareIdentity] = useState(true);
   const [qrData, setQrData] = useState<string | null>(null);
   const [countdown, setCountdown] = useState(0);
   const [generating, setGenerating] = useState(false);
@@ -45,6 +46,7 @@ export default function PairMobileDialog({
     const firstConnectedId = Object.entries(gatewayStatusMap).find(([, s]) => s === 'connected')?.[0] ?? null;
     const firstGatewayId = gatewayEntries[0]?.[0] ?? null;
     setSelectedGatewayId(firstConnectedId ?? firstGatewayId);
+    setShareIdentity(true);
     setQrData(null);
     setCountdown(0);
     setGenerating(false);
@@ -60,50 +62,55 @@ export default function PairMobileDialog({
     };
   }, []);
 
-  const handleGenerate = useCallback(async () => {
-    if (!selectedGatewayId) return;
-    setGenerating(true);
+  const handleGenerate = useCallback(
+    async (identity = shareIdentity) => {
+      if (!selectedGatewayId) return;
+      setGenerating(true);
 
-    try {
-      const settings = await window.clawwork.getSettings();
-      if (!settings) return;
+      try {
+        const settings = await window.clawwork.getSettings();
+        if (!settings) return;
 
-      const deviceId = await window.clawwork.getDeviceId();
-      const payload: QrPayload = { v: 1, s: deviceId, g: [] };
+        const payload: QrPayload = { v: 1, g: [] };
+        if (identity) {
+          payload.s = await window.clawwork.getDeviceId();
+        }
 
-      const cfg = settings.gateways.find((g: { id: string }) => g.id === selectedGatewayId);
-      if (!cfg) return;
+        const cfg = settings.gateways.find((g: { id: string }) => g.id === selectedGatewayId);
+        if (!cfg) return;
 
-      const mode: 'token' | 'password' | 'pairingCode' =
-        cfg.authMode ?? (cfg.pairingCode ? 'pairingCode' : cfg.password ? 'password' : 'token');
-      payload.g.push({
-        u: cfg.url.replace(/^https:/, 'wss:').replace(/^http:/, 'ws:'),
-        t: mode === 'token' ? (cfg.token ?? '') : undefined,
-        p: mode === 'password' ? cfg.password : undefined,
-        c: mode === 'pairingCode' ? cfg.pairingCode : undefined,
-        m: mode,
-        n: cfg.name,
-      });
-
-      setQrData(JSON.stringify(payload));
-      setCountdown(QR_TTL_SECONDS);
-
-      if (timerRef.current) clearInterval(timerRef.current);
-      timerRef.current = setInterval(() => {
-        setCountdown((prev) => {
-          if (prev <= 1) {
-            if (timerRef.current) clearInterval(timerRef.current);
-            timerRef.current = null;
-            setQrData(null);
-            return 0;
-          }
-          return prev - 1;
+        const mode: 'token' | 'password' | 'pairingCode' =
+          cfg.authMode ?? (cfg.pairingCode ? 'pairingCode' : cfg.password ? 'password' : 'token');
+        payload.g.push({
+          u: cfg.url.replace(/^https:/, 'wss:').replace(/^http:/, 'ws:'),
+          t: mode === 'token' ? (cfg.token ?? '') : undefined,
+          p: mode === 'password' ? cfg.password : undefined,
+          c: mode === 'pairingCode' ? cfg.pairingCode : undefined,
+          m: mode,
+          n: cfg.name,
         });
-      }, 1000);
-    } finally {
-      setGenerating(false);
-    }
-  }, [selectedGatewayId]);
+
+        setQrData(JSON.stringify(payload));
+        setCountdown(QR_TTL_SECONDS);
+
+        if (timerRef.current) clearInterval(timerRef.current);
+        timerRef.current = setInterval(() => {
+          setCountdown((prev) => {
+            if (prev <= 1) {
+              if (timerRef.current) clearInterval(timerRef.current);
+              timerRef.current = null;
+              setQrData(null);
+              return 0;
+            }
+            return prev - 1;
+          });
+        }, 1000);
+      } finally {
+        setGenerating(false);
+      }
+    },
+    [selectedGatewayId, shareIdentity],
+  );
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -153,6 +160,20 @@ export default function PairMobileDialog({
             </div>
           </div>
 
+          <label className="flex cursor-pointer items-center gap-3 rounded-lg bg-[var(--bg-tertiary)] px-3 py-2 transition-colors hover:bg-[var(--bg-hover)]">
+            <input
+              type="checkbox"
+              checked={shareIdentity}
+              onChange={(e) => {
+                const next = e.target.checked;
+                setShareIdentity(next);
+                if (qrData) handleGenerate(next);
+              }}
+              className="h-4 w-4 accent-[var(--accent)]"
+            />
+            <span className="type-body text-[var(--text-primary)]">{t('settings.pairShareIdentity')}</span>
+          </label>
+
           {qrData ? (
             <div className="flex flex-col items-center gap-3">
               <div className="rounded-xl p-3" style={{ backgroundColor: 'var(--surface-qr-bg)' }}>
@@ -163,7 +184,7 @@ export default function PairMobileDialog({
               </p>
             </div>
           ) : (
-            <Button onClick={handleGenerate} disabled={!selectedGatewayId || generating} className="w-full">
+            <Button onClick={() => handleGenerate()} disabled={!selectedGatewayId || generating} className="w-full">
               {generating ? <Loader2 size={16} className="animate-spin" /> : t('settings.pairGenerate')}
             </Button>
           )}
