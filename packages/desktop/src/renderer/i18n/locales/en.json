@@ -249,6 +249,24 @@
     "wakeMode_nextHeartbeat": "Next Heartbeat",
     "wakeMode_now": "Immediate"
   },
+  "dashboard": {
+    "activeDays": "Active Days",
+    "allTimeSection": "All Time",
+    "breakdownsSection": "Breakdowns",
+    "cost": "Cost",
+    "inputTokens": "Input Tokens",
+    "last30dSection": "Last 30 Days",
+    "noBreakdownData": "No data",
+    "noData": "No gateway data available",
+    "outputTokens": "Output Tokens",
+    "tokenChart": "Daily Token Trend",
+    "topAgents": "Top Agents",
+    "topGateways": "Top Gateways",
+    "topModels": "Top Models",
+    "totalArtifacts": "Total Artifacts",
+    "totalMessages": "Total Messages",
+    "totalTasks": "Total Tasks"
+  },
   "dialog": {
     "confirm": "Continue",
     "deleteTaskDesc": "This will permanently delete the task, all messages, and the server session. This cannot be undone.",
@@ -297,6 +315,7 @@
     "appSettings": "App Settings",
     "archivedChats": "Archived Chats",
     "collapseNav": "Collapse sidebar",
+    "dashboard": "Dashboard",
     "emptyHint": "Click \"New Task\" to start",
     "expandNav": "Expand sidebar",
     "scheduledTasks": "Scheduled",
