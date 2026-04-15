@@ -10,6 +10,7 @@
     "dev:website": "pnpm --filter @clawwork/website dev",
     "dev:pwa": "pnpm --filter @clawwork/pwa dev",
     "dev:slides": "pnpm --filter @clawwork/keynote dev",
+    "dev:slides:dev": "pnpm --filter @clawwork/keynote dev:dev",
     "build": "pnpm -r build",
     "check:architecture": "node scripts/check-architecture.mjs",
     "check:renderer-copy": "node scripts/check-renderer-copy.mjs",
