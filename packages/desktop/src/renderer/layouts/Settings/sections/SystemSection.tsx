@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/button';
 import Toggle from '../components/Toggle';
 import SettingRow from '@/components/semantic/SettingRow';
 import SettingGroup from '@/components/semantic/SettingGroup';
+import { useSettingsStore } from '@/stores/settingsStore';
 
 export default function SystemSection() {
   const { t } = useTranslation();
@@ -14,8 +15,11 @@ export default function SystemSection() {
   const [quickLaunchEnabled, setQuickLaunchEnabled] = useState(false);
   const [quickLaunchShortcut, setQuickLaunchShortcut] = useState('Alt+Space');
   const [recordingShortcut, setRecordingShortcut] = useState(false);
-  const [workspacePath, setWorkspacePath] = useState('');
   const [changingWorkspace, setChangingWorkspace] = useState(false);
+  const workspacePath = useSettingsStore((s) => s.settings?.workspacePath);
+  const settingsLoaded = useSettingsStore((s) => s.loaded);
+  const loadSettings = useSettingsStore((s) => s.load);
+  const refreshSettings = useSettingsStore((s) => s.refresh);
 
   useEffect(() => {
     window.clawwork
@@ -29,13 +33,14 @@ export default function SystemSection() {
       .getTrayEnabled()
       .then(setTrayEnabled)
       .catch((err) => console.error('[SystemSection] getTrayEnabled failed:', err));
-    window.clawwork
-      .getSettings()
-      .then((settings) => {
-        if (settings) setWorkspacePath(settings.workspacePath || t('common.notConfigured'));
-      })
-      .catch((err) => console.error('[SystemSection] getSettings failed:', err));
   }, [t]);
+
+  useEffect(() => {
+    if (settingsLoaded) return;
+    void loadSettings().catch((err: unknown) => {
+      console.error('[SystemSection] loadSettings failed:', err);
+    });
+  }, [settingsLoaded, loadSettings]);
 
   const handleTrayToggle = useCallback(
     async (enabled: boolean) => {
@@ -67,7 +72,7 @@ export default function SystemSection() {
     const result = await window.clawwork.changeWorkspace(selected);
     setChangingWorkspace(false);
     if (result.ok) {
-      setWorkspacePath(selected);
+      await refreshSettings().catch(() => {});
       toast.success(t('settings.workspaceChanged'), {
         description: t('settings.workspaceOldPathHint', { path: oldPath }),
         duration: 8000,
@@ -75,7 +80,7 @@ export default function SystemSection() {
     } else {
       toast.error(t('settings.workspaceChangeFailed', { error: result.error }));
     }
-  }, [workspacePath, t]);
+  }, [refreshSettings, workspacePath, t]);
 
   const handleShortcutRecord = useCallback(
     (e: React.KeyboardEvent) => {
@@ -204,7 +209,7 @@ export default function SystemSection() {
                 'type-mono-data text-[var(--text-primary)] break-all',
               )}
             >
-              {workspacePath}
+              {workspacePath || t('common.notConfigured')}
             </div>
             <Button
               variant="outline"
