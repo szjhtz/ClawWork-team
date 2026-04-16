@@ -63,6 +63,7 @@ function SelectionTag({
   onRemove: () => void;
   variant?: 'accent' | 'muted';
 }) {
+  const { t } = useTranslation();
   return (
     <span
       className={cn(
@@ -74,7 +75,7 @@ function SelectionTag({
     >
       <span className="flex-shrink-0">{icon}</span>
       {label}
-      <button onClick={onRemove} className="ml-0.5 opacity-50 hover:opacity-100">
+      <button onClick={onRemove} aria-label={t('common.remove')} className="ml-0.5 opacity-50 hover:opacity-100">
         <X size={12} />
       </button>
     </span>
@@ -483,6 +484,7 @@ export default function ChatInput() {
                   </div>
                   <button
                     onClick={() => removeImage(i)}
+                    aria-label={t('common.remove')}
                     className={cn(
                       'absolute top-0 right-0 h-5 w-5 rounded-full',
                       'bg-[var(--bg-elevated)] border border-[var(--border-subtle)]',
@@ -673,6 +675,7 @@ export default function ChatInput() {
                         size="icon-sm"
                         onClick={() => fileInputRef.current?.click()}
                         disabled={disabled}
+                        aria-label={t('chatInput.attachFile')}
                         className="rounded-lg text-[var(--text-secondary)] hover:text-[var(--text-primary)]"
                       >
                         <Plus size={18} />
@@ -788,6 +791,7 @@ export default function ChatInput() {
                               void startVoiceInput();
                             }}
                             disabled={disabled}
+                            aria-label={voiceTooltip}
                             className={cn(
                               'rounded-xl',
                               isVoiceListening && 'text-[var(--accent)]',
@@ -816,6 +820,7 @@ export default function ChatInput() {
                                 size="icon"
                                 onClick={handleAbort}
                                 disabled={aborting}
+                                aria-label={t('chatInput.stopGenerating')}
                                 className="rounded-xl"
                               >
                                 <Square size={16} fill="currentColor" />
@@ -839,6 +844,7 @@ export default function ChatInput() {
                             size="icon"
                             onClick={handleSend}
                             disabled={disabled || !canSend}
+                            aria-label={t('chatInput.send')}
                             className={cn(
                               'rounded-2xl',
                               canSend
@@ -868,6 +874,7 @@ export default function ChatInput() {
                       variant="ghost"
                       size="icon-sm"
                       onClick={() => setDashboardOpen(true)}
+                      aria-label={t('slashDashboard.tooltip')}
                       icon={<TerminalSquare size={14} className="flex-shrink-0" />}
                       className="rounded-lg text-[var(--text-secondary)]"
                     />
@@ -895,6 +902,7 @@ export default function ChatInput() {
                       <span className="truncate">{folder.split('/').pop()}</span>
                       <button
                         onClick={() => handleRemoveContextFolder(folder)}
+                        aria-label={t('common.remove')}
                         className="flex-shrink-0 opacity-50 transition-opacity hover:opacity-100"
                       >
                         <X size={12} />

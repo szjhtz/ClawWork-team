@@ -18,7 +18,6 @@ import { useTraySync } from './hooks/useTraySync';
 import { cn } from '@/lib/utils';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import { motionDuration, motionEase } from '@/styles/design-tokens';
-import AmbientShell from '@/components/ambient/AmbientShell';
 import { useSettingsStore } from './stores/settingsStore';
 
 export default function App() {
@@ -225,15 +224,11 @@ export default function App() {
   return (
     <TooltipProvider>
       <AnimatePresence>{commandPaletteOpen && <CommandPalette />}</AnimatePresence>
-      <div
-        className="relative flex h-screen overflow-hidden bg-[var(--bg-primary)]"
-        style={{ backgroundImage: 'var(--bg-ambient)' }}
-      >
-        <AmbientShell />
+      <div className="relative flex h-screen overflow-hidden bg-[var(--bg-primary)]">
         <motion.aside
           animate={{ width: leftNavCollapsed ? 52 : leftNavWidth }}
           transition={{ duration: motionDuration.moderate, ease: motionEase.standard }}
-          className={cn('glass-heavy noise relative flex-shrink-0 overflow-hidden z-[1] border-r-0')}
+          className={cn('glass-heavy relative flex-shrink-0 overflow-hidden z-[1] border-r-0')}
           style={{ minWidth: leftNavCollapsed ? 52 : 180 }}
         >
           <LeftNav />
@@ -266,7 +261,7 @@ export default function App() {
                 animate={{ width: rightPanelWidth, opacity: 1 }}
                 exit={{ width: 0, opacity: 0 }}
                 transition={{ duration: motionDuration.moderate, ease: motionEase.standard }}
-                className={cn('glass-heavy noise relative flex-shrink-0 overflow-hidden z-[1] border-l-0')}
+                className={cn('glass-heavy relative flex-shrink-0 overflow-hidden z-[1] border-l-0')}
               >
                 <RightPanel />
               </motion.aside>
